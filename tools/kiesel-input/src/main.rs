@@ -14,6 +14,11 @@
 //! Keyboard (us layout): `key <combo>`, `keydown <combo>`, `keyup <combo>`,
 //! `type <text>` – a combo is xkb key names joined by `+`, e.g. `Tab`,
 //! `shift+Tab`, `ctrl+a`, `space`, `Return`, `Escape`.
+//!
+//! Input method (input-method-v2, which the compositor relays to the focused
+//! client's text-input-v3): `ime preedit <text>`, `ime commit <text>`,
+//! `ime clear`, `ime delete <before> <after>` – an error unless a client has
+//! text input switched on right now.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsFd;
@@ -21,6 +26,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use wayland_client::protocol::{wl_keyboard, wl_pointer, wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
+use wayland_protocols_misc::zwp_input_method_v2::client::{
+    zwp_input_method_manager_v2 as im_manager, zwp_input_method_v2 as im,
+};
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
     zwp_virtual_keyboard_manager_v1 as vk_manager, zwp_virtual_keyboard_v1 as vk,
 };
@@ -34,6 +42,41 @@ struct State {
     seat: Option<wl_seat::WlSeat>,
     manager: Option<manager::ZwlrVirtualPointerManagerV1>,
     keyboards: Option<vk_manager::ZwpVirtualKeyboardManagerV1>,
+    input_methods: Option<im_manager::ZwpInputMethodManagerV2>,
+    ime: ImeState,
+}
+
+/// What the compositor told the input method; applied on `done`
+#[derive(Default)]
+struct ImeState {
+    pending_active: bool,
+    active: bool,
+    /// Number of `done` events: the serial `commit` must carry
+    serial: u32,
+    unavailable: bool,
+}
+
+impl Dispatch<im::ZwpInputMethodV2, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &im::ZwpInputMethodV2,
+        event: im::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let ime = &mut state.ime;
+        match event {
+            im::Event::Activate => ime.pending_active = true,
+            im::Event::Deactivate => ime.pending_active = false,
+            im::Event::Done => {
+                ime.active = ime.pending_active;
+                ime.serial += 1;
+            }
+            im::Event::Unavailable => ime.unavailable = true,
+            _ => {}
+        }
+    }
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State {
@@ -61,6 +104,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 "zwp_virtual_keyboard_manager_v1" => {
                     state.keyboards = Some(registry.bind(name, 1, qh, ()))
                 }
+                "zwp_input_method_manager_v2" => {
+                    state.input_methods = Some(registry.bind(name, 1, qh, ()))
+                }
                 _ => {}
             }
         }
@@ -72,6 +118,7 @@ wayland_client::delegate_noop!(State: manager::ZwlrVirtualPointerManagerV1);
 wayland_client::delegate_noop!(State: vp::ZwlrVirtualPointerV1);
 wayland_client::delegate_noop!(State: vk_manager::ZwpVirtualKeyboardManagerV1);
 wayland_client::delegate_noop!(State: vk::ZwpVirtualKeyboardV1);
+wayland_client::delegate_noop!(State: im_manager::ZwpInputMethodManagerV2);
 
 fn now_ms() -> u32 {
     SystemTime::now()
@@ -252,6 +299,7 @@ impl Keyboard {
 struct Devices {
     pointer: Pointer,
     keyboard: Keyboard,
+    ime: Option<im::ZwpInputMethodV2>,
 }
 
 impl Devices {
@@ -332,6 +380,38 @@ impl Devices {
                     sync(state)?;
                 }
             }
+            "ime" => {
+                // events first: the client may just have switched text input on or off
+                sync(state)?;
+                let im = self
+                    .ime
+                    .as_ref()
+                    .ok_or("no input method (another one is running?)")?;
+                if state.ime.unavailable {
+                    return Err("input method unavailable: another one is registered".into());
+                }
+                if !state.ime.active {
+                    return Err("no client has text input on".into());
+                }
+                let (verb, text) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
+                match verb {
+                    "preedit" => {
+                        let end = text.len() as i32;
+                        im.set_preedit_string(text.to_string(), end, end);
+                    }
+                    "commit" => im.commit_string(text.to_string()),
+                    "clear" => im.set_preedit_string(String::new(), 0, 0),
+                    "delete" => {
+                        let mut n = text.split_whitespace().map(str::parse::<u32>);
+                        let (Some(Ok(before)), Some(Ok(after))) = (n.next(), n.next()) else {
+                            return Err("ime delete <before> <after>".into());
+                        };
+                        im.delete_surrounding_text(before, after);
+                    }
+                    other => return Err(format!("unknown ime command {other}")),
+                }
+                im.commit(state.ime.serial);
+            }
             "" => return Ok(()),
             other => return Err(format!("unknown command {other}")),
         }
@@ -361,6 +441,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             extent: (w.parse()?, h.parse()?),
         },
         keyboard: Keyboard::new(keyboards.create_virtual_keyboard(seat, &qh, ()))?,
+        ime: state
+            .input_methods
+            .as_ref()
+            .map(|m| m.get_input_method(seat, &qh, ())),
     };
     queue.roundtrip(&mut state)?;
 

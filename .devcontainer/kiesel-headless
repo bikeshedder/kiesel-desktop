@@ -12,10 +12,18 @@
 #   kiesel-headless key <combo>                           press and release, e.g. Tab, shift+Tab, space
 #   kiesel-headless keydown|keyup <combo>                 hold / let go
 #   kiesel-headless type <text>                           type text (us layout)
+#   kiesel-headless ime preedit|commit <text>             act as the input method (also: clear,
+#                                                         delete <before> <after>; fails unless a
+#                                                         client has text input on)
 #   kiesel-headless a11y                                  dump the AT-SPI tree of running apps
 #   kiesel-headless a11y click|focus <name>               act on the first node with that name
+#                                                         (--role <role> before the name narrows it,
+#                                                         e.g. a11y box --role entry Name)
 #   kiesel-headless a11y where <name>                     its centre in logical coordinates
 #   kiesel-headless a11y box <name>                       its x y width height (logical)
+#   kiesel-headless a11y value <name>                     its value (text fields)
+#   kiesel-headless a11y set <name> = <value>             set its value, as a screen reader would
+#   kiesel-headless a11y caret <name> [= offset]          print (or move) its caret, in characters
 #   kiesel-headless stop
 #
 # Software rendering only: sway uses the pixman renderer, clients get Mesa's
@@ -135,6 +143,7 @@ case "$cmd" in
   scroll) [[ $# -eq 1 ]] || die "scroll <dy>"; input scroll "$1" ;;
   key | keydown | keyup) [[ $# -eq 1 ]] || die "$cmd <combo>"; input "$cmd" "$1" ;;
   type) [[ $# -ge 1 ]] || die "type <text>"; input type "$*" ;;
+  ime) [[ $# -ge 1 ]] || die "ime preedit|commit|clear|delete …"; input ime "$*" ;;
   a11y)
     load
     exec python3 - "$@" <<'EOF'
@@ -151,11 +160,11 @@ def walk(acc, depth=0):
     except Exception as e:
         print(f"{'  ' * depth}<{e}>")
 
-def find(acc, name):
-    if acc.name == name and acc.getRoleName() != "application":
+def find(acc, name, role=None):
+    if acc.name == name and acc.getRoleName() != "application" and role in (None, acc.getRoleName()):
         return acc
     for child in acc:
-        hit = find(child, name)
+        hit = find(child, name, role)
         if hit:
             return hit
     return None
@@ -164,8 +173,17 @@ desktop = pyatspi.Registry.getDesktop(0)
 if len(sys.argv) == 1:
     walk(desktop)
     sys.exit()
-verb, name = sys.argv[1], " ".join(sys.argv[2:])
-acc = find(desktop, name)
+verb, args, role = sys.argv[1], sys.argv[2:], None
+if args[:1] == ["--role"]:
+    role, args = args[1], args[2:]
+value = None
+if "=" in args:
+    i = args.index("=")
+    args, value = args[:i], " ".join(args[i + 1:])
+elif verb == "set":
+    sys.exit("a11y set <name> = <value>")
+name = " ".join(args)
+acc = find(desktop, name, role)
 if acc is None:
     sys.exit(f"no accessible named {name!r}")
 if verb == "click":
@@ -176,6 +194,18 @@ if verb == "click":
     action.doAction(names.index("click"))
 elif verb == "focus":
     acc.queryComponent().grabFocus()
+elif verb == "value":
+    text = acc.queryText()
+    print(text.getText(0, text.characterCount))
+elif verb == "caret":
+    text = acc.queryText()
+    if value is None:
+        print(text.caretOffset)
+    elif not text.setCaretOffset(int(value)):
+        sys.exit(f"{name!r} refused the caret offset")
+elif verb == "set":
+    if not acc.queryEditableText().setTextContents(value):
+        sys.exit(f"{name!r} refused the value")
 elif verb in ("where", "box"):
     # Wayland windows sit at the origin here (one tiled window); extents are pixels
     import os
@@ -186,5 +216,5 @@ else:
     sys.exit(f"unknown a11y verb {verb}")
 EOF
     ;;
-  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
+  *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
 esac
