@@ -15,6 +15,8 @@
 #   kiesel-headless ime preedit|commit <text>             act as the input method (also: clear,
 #                                                         delete <before> <after>; fails unless a
 #                                                         client has text input on)
+#   kiesel-headless portal light|dark|none                the system's colour-scheme preference, served
+#                                                         by a fake XDG portal (tools/fake-portal.py)
 #   kiesel-headless a11y                                  dump the AT-SPI tree of running apps
 #   kiesel-headless a11y click|focus <name>               act on the first node with that name
 #                                                         (--role <role> before the name narrows it,
@@ -112,10 +114,30 @@ EOF
 }
 
 stop() {
-  for p in input sway atspi dbus; do
+  for p in portal input sway atspi dbus; do
     [[ -f "$STATE/$p.pid" ]] && kill "$(cat "$STATE/$p.pid")" 2>/dev/null || true
   done
   rm -f "$STATE"/*.pid "$STATE/env" "$STATE/sway.env" "$STATE"/input.in "$STATE"/input.ack
+}
+
+# Starts the fake portal on first use, then sets its colour-scheme
+portal() {
+  load
+  local value
+  case "${1:-}" in
+    none) value=0 ;;
+    dark) value=1 ;;
+    light) value=2 ;;
+    *) die "portal light|dark|none" ;;
+  esac
+  if ! kill -0 "$(cat "$STATE/portal.pid" 2>/dev/null)" 2>/dev/null; then
+    python3 "$WORKSPACE/tools/fake-portal.py" "$value" >"$STATE/portal.log" 2>&1 &
+    echo $! >"$STATE/portal.pid"
+    for _ in $(seq 50); do grep -q ready "$STATE/portal.log" 2>/dev/null && return; sleep 0.1; done
+    die "the fake portal did not start (see $STATE/portal.log)"
+  fi
+  gdbus call --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop \
+    --method org.kiesel.FakePortal.SetColorScheme "$value" >/dev/null
 }
 
 # Sends one command to kiesel-input and waits until it has been delivered
@@ -144,6 +166,7 @@ case "$cmd" in
   key | keydown | keyup) [[ $# -eq 1 ]] || die "$cmd <combo>"; input "$cmd" "$1" ;;
   type) [[ $# -ge 1 ]] || die "type <text>"; input type "$*" ;;
   ime) [[ $# -ge 1 ]] || die "ime preedit|commit|clear|delete …"; input ime "$*" ;;
+  portal) portal "$@" ;;
   a11y)
     load
     exec python3 - "$@" <<'EOF'
@@ -216,5 +239,5 @@ else:
     sys.exit(f"unknown a11y verb {verb}")
 EOF
     ;;
-  *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
+  *) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
 esac
