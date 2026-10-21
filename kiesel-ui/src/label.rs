@@ -6,6 +6,7 @@ use reactive_graph::traits::{Track, WithUntracked};
 use reactive_graph::wrappers::read::ArcSignal;
 use vello_cpu::kurbo::{Rect, Size};
 
+use crate::i18n::IntoText;
 use crate::reactive::{MountCx, Watch};
 use crate::text::{self, wrap};
 use crate::theme::TextRole;
@@ -25,13 +26,9 @@ pub struct Label {
 }
 
 impl Label {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self::bound(ArcSignal::stored(text.into()))
-    }
-
-    /// Text that follows a signal (or `ArcSignal::derive(…)`)
-    pub fn bound(text: impl Into<ArcSignal<String>>) -> Self {
-        let text = text.into();
+    /// A string, or a signal to follow: `t("…")`, `ArcSignal::derive(…)`
+    pub fn new(text: impl IntoText) -> Self {
+        let text = text.into_text();
         Self {
             id: WidgetId::next(),
             shown: text.with_untracked(String::clone),
@@ -49,11 +46,16 @@ impl Label {
         self
     }
 
-    pub fn title(text: impl Into<String>) -> Self {
+    /// The same as [`Label::new`] – kept for code that reads better with it
+    pub fn bound(text: impl IntoText) -> Self {
+        Self::new(text)
+    }
+
+    pub fn title(text: impl IntoText) -> Self {
         Self::new(text).role(TextRole::Title)
     }
 
-    pub fn caption(text: impl Into<String>) -> Self {
+    pub fn caption(text: impl IntoText) -> Self {
         Self::new(text).role(TextRole::Caption)
     }
 

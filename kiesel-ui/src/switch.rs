@@ -16,6 +16,7 @@ use winit::cursor::CursorIcon;
 use winit::keyboard::Key;
 
 use crate::anim::{Easing, Transition};
+use crate::i18n::{IntoText, TextProp};
 use crate::paint::{self, TOLERANCE};
 use crate::reactive::{MountCx, Watch};
 use crate::theme::{ControlSize, Shadow, Theme};
@@ -46,7 +47,7 @@ pub struct Switch {
     watch: Option<Watch>,
     shown: bool,
     on_change: Option<OnChange>,
-    label: String,
+    label: TextProp,
     size: ControlSize,
     bounds: Rect,
     hovered: bool,
@@ -70,7 +71,7 @@ impl Switch {
             watch: None,
             shown,
             on_change: None,
-            label: String::new(),
+            label: TextProp::default(),
             size: ControlSize::Md,
             bounds: Rect::ZERO,
             hovered: false,
@@ -92,8 +93,8 @@ impl Switch {
     }
 
     /// Its accessible name
-    pub fn label(mut self, text: impl Into<String>) -> Self {
-        self.label = text.into();
+    pub fn label(mut self, text: impl IntoText) -> Self {
+        self.label = TextProp::new(text);
         self
     }
 
@@ -129,8 +130,11 @@ impl Widget for Switch {
     }
 
     fn mount(&mut self, cx: &mut MountCx<'_>) {
-        let checked = self.checked.clone();
-        self.watch = Some(cx.watch(self.id, move || checked.track()));
+        let (checked, label) = (self.checked.clone(), self.label.signal());
+        self.watch = Some(cx.watch(self.id, move || {
+            checked.track();
+            label.track();
+        }));
     }
 
     fn update(&mut self, cx: &mut LayoutCx<'_>) -> Change {
@@ -139,6 +143,7 @@ impl Widget for Switch {
             self.shown = checked;
             self.sync(cx.now, cx.theme);
         }
+        self.repaint |= self.label.refresh();
         if std::mem::take(&mut self.repaint) {
             Change::PAINT
         } else {
@@ -232,8 +237,8 @@ impl Widget for Switch {
 
     fn accessibility(&self) -> Option<accesskit::Node> {
         let mut node = accesskit::Node::new(accesskit::Role::Switch);
-        if !self.label.is_empty() {
-            node.set_label(self.label.clone());
+        if !self.label.shown.is_empty() {
+            node.set_label(self.label.shown.clone());
         }
         node.set_toggled(if self.shown {
             accesskit::Toggled::True

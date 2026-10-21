@@ -15,6 +15,7 @@ use winit::cursor::CursorIcon;
 use winit::keyboard::{Key, NamedKey};
 
 use crate::anim::{Easing, Transition};
+use crate::i18n::{IntoText, TextProp, t};
 use crate::icon::{self, Icon};
 use crate::reactive::{MountCx, Watch};
 use crate::switch::Switch;
@@ -38,7 +39,7 @@ const ARRIVE: f64 = 0.6;
 pub struct IconToggle {
     id: WidgetId,
     icon: Icon,
-    label: String,
+    label: TextProp,
     pressed: ArcSignal<bool>,
     watch: Option<Watch>,
     shown: bool,
@@ -61,13 +62,13 @@ pub struct IconToggle {
 }
 
 impl IconToggle {
-    pub fn new(icon: Icon, label: impl Into<String>, pressed: impl Into<ArcSignal<bool>>) -> Self {
+    pub fn new(icon: Icon, label: impl IntoText, pressed: impl Into<ArcSignal<bool>>) -> Self {
         let pressed = pressed.into();
         let shown = pressed.get_untracked();
         Self {
             id: WidgetId::next(),
             icon,
-            label: label.into(),
+            label: TextProp::new(label),
             pressed,
             watch: None,
             shown,
@@ -130,8 +131,11 @@ impl Widget for IconToggle {
     }
 
     fn mount(&mut self, cx: &mut MountCx<'_>) {
-        let pressed = self.pressed.clone();
-        self.watch = Some(cx.watch(self.id, move || pressed.track()));
+        let (pressed, label) = (self.pressed.clone(), self.label.signal());
+        self.watch = Some(cx.watch(self.id, move || {
+            pressed.track();
+            label.track();
+        }));
     }
 
     fn update(&mut self, cx: &mut LayoutCx<'_>) -> Change {
@@ -143,6 +147,7 @@ impl Widget for IconToggle {
             }
             self.sync(cx.now);
         }
+        self.repaint |= self.label.refresh();
         if std::mem::take(&mut self.repaint) {
             Change::PAINT
         } else {
@@ -235,7 +240,7 @@ impl Widget for IconToggle {
 
     fn accessibility(&self) -> Option<accesskit::Node> {
         let mut node = accesskit::Node::new(accesskit::Role::Button);
-        node.set_label(self.label.clone());
+        node.set_label(self.label.shown.clone());
         node.set_toggled(if self.shown {
             accesskit::Toggled::True
         } else {
@@ -292,6 +297,8 @@ pub struct ThemeSwitch {
     id: WidgetId,
     children: Vec<Box<dyn Widget>>,
     gap: f64,
+    label: TextProp,
+    watch: Option<Watch>,
     bounds: Rect,
 }
 
@@ -327,13 +334,13 @@ impl ThemeSwitch {
         let mode = theming.mode();
         let children: Vec<Box<dyn Widget>> = vec![
             Box::new(
-                IconToggle::new(icon::SUN, "Light", is(Scheme::Light))
+                IconToggle::new(icon::SUN, t("kiesel.themeSwitch.light"), is(Scheme::Light))
                     .icon_size(px, stroke)
                     .on_press(choose(Scheme::Light)),
             ),
             Box::new(
                 Switch::new(is(Scheme::Dark))
-                    .label("Dark")
+                    .label(t("kiesel.themeSwitch.dark"))
                     .size(size)
                     .on_change(move |dark| {
                         mode.set(if dark {
@@ -344,16 +351,22 @@ impl ThemeSwitch {
                     }),
             ),
             Box::new(
-                IconToggle::new(icon::MOON_STAR, "Dark", is(Scheme::Dark))
-                    .arrival(Arrival::Rock)
-                    .icon_size(px, stroke)
-                    .on_press(choose(Scheme::Dark)),
+                IconToggle::new(
+                    icon::MOON_STAR,
+                    t("kiesel.themeSwitch.dark"),
+                    is(Scheme::Dark),
+                )
+                .arrival(Arrival::Rock)
+                .icon_size(px, stroke)
+                .on_press(choose(Scheme::Dark)),
             ),
         ];
         Self {
             id: WidgetId::next(),
             children,
             gap,
+            label: TextProp::new(t("kiesel.themeSwitch.label")),
+            watch: None,
             bounds: Rect::ZERO,
         }
     }
@@ -370,6 +383,19 @@ impl Widget for ThemeSwitch {
 
     fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
         &mut self.children
+    }
+
+    fn mount(&mut self, cx: &mut MountCx<'_>) {
+        let label = self.label.signal();
+        self.watch = Some(cx.watch(self.id, move || label.track()));
+    }
+
+    fn update(&mut self, _cx: &mut LayoutCx<'_>) -> Change {
+        if self.label.refresh() {
+            Change::PAINT
+        } else {
+            Change::NONE
+        }
     }
 
     fn style(&self, _theme: &Theme) -> taffy::Style {
@@ -396,7 +422,7 @@ impl Widget for ThemeSwitch {
 
     fn accessibility(&self) -> Option<accesskit::Node> {
         let mut node = accesskit::Node::new(accesskit::Role::Group);
-        node.set_label("Theme");
+        node.set_label(self.label.shown.clone());
         node.set_bounds(accessible_rect(self.bounds));
         Some(node)
     }

@@ -15,6 +15,7 @@ use reactive_graph::traits::{GetUntracked, Set, Track};
 use vello_cpu::kurbo::{Affine, BezPath, Point, Rect, Size, Stroke, Vec2};
 
 use crate::anim::{CubicBezier, EASE};
+use crate::i18n::{IntoText, TextProp};
 use crate::layout::Layout;
 use crate::paint;
 use crate::reactive::{MountCx, Watch};
@@ -593,7 +594,7 @@ pub struct Popover {
     make: MakeContent,
     placement: Placement,
     arrow: bool,
-    label: String,
+    label: TextProp,
     layer: Option<WidgetId>,
     bounds: Rect,
 }
@@ -612,7 +613,7 @@ impl Popover {
             make: Box::new(move || Box::new(content())),
             placement: Placement::BOTTOM_START,
             arrow: false,
-            label: String::new(),
+            label: TextProp::default(),
             layer: None,
             bounds: Rect::ZERO,
         }
@@ -629,9 +630,9 @@ impl Popover {
         self
     }
 
-    /// The panel's name for assistive technology
-    pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.label = label.into();
+    /// The panel's name for assistive technology (the text at opening)
+    pub fn label(mut self, label: impl IntoText) -> Self {
+        self.label = TextProp::new(label);
         self
     }
 }
@@ -668,7 +669,10 @@ impl Widget for Popover {
                     anchor: trigger.bounds(),
                     placement: self.placement,
                     arrow: self.arrow,
-                    label: self.label.clone(),
+                    label: {
+                        self.label.refresh();
+                        self.label.shown.clone()
+                    },
                     content: (self.make)(),
                     on_dismiss: Some(Box::new(move || open.set(false))),
                 }));

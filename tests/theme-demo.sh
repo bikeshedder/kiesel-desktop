@@ -75,7 +75,7 @@ run_case() {
   [[ ! -e "$CONF" ]] || fail "$tag: following the system wrote $CONF"
 
   # the switch chooses dark; the system no longer counts
-  $H click $($H a11y where --role "toggle button" Dark); settle
+  $H click $($H a11y where --role "toggle button" "Dark theme"); settle
   expect_caption "Dark, chosen here" "after clicking the switch"
   expect_bg dark "chosen dark"
   grep -qx "theme = dark" "$CONF" || fail "$tag: the choice was not saved"
@@ -87,11 +87,11 @@ run_case() {
   $H key space; settle
   expect_caption "Light, chosen here" "after Space on the switch"
   # the moon and the sun choose as well
-  $H click $($H a11y where --role "toggle button" Light); settle
+  $H click $($H a11y where --role "toggle button" "Light theme"); settle
   expect_caption "Light, chosen here" "pressing the pressed sun changes nothing"
   local moon
-  moon=$($H a11y box --role "toggle button" Dark >/dev/null; $H a11y | grep -c "toggle button 'Dark'")
-  [[ "$moon" == 2 ]] || fail "$tag: expected the switch and the moon named Dark"
+  moon=$($H a11y box --role "toggle button" "Dark theme" >/dev/null; $H a11y | grep -c "toggle button 'Dark theme'")
+  [[ "$moon" == 2 ]] || fail "$tag: expected the switch and the moon named Dark theme"
   $H key Tab; $H key space; settle  # focus moves from the switch to the moon
   expect_caption "Dark, chosen here" "Space on the moon"
 

@@ -29,6 +29,7 @@ The stack, measured baselines and the headless test setup are in [PLAN.md](PLAN.
 | State | signals to the widgets that show them (any thread), timers (`wake_at`), `Show` and keyed `For` |
 | Accessibility | AccessKit on AT-SPI: roles, states, actions, text runs, caret and selection |
 | Theme | light/dark/system (XDG portal), saved per app, cross-fade, Lucide icons |
+| Messages | Kiesel's catalogs (English, German), MessageFormat 2 subset, language switch at runtime |
 | Widgets | Button (default, loading), Label, Card, TextField, Switch, IconToggle, ThemeSwitch, Scroll, Popover |
 
 ## D1 – Foundations (before many more widgets)
@@ -51,9 +52,13 @@ Without these, every widget after Field and Checkbox would be built twice.
   dismisses the topmost; a press on the owner only closes it; opened from the keyboard, focus moves in and Tab
   stays inside; focus returns on close. `Popover` is the first user. Real popup surfaces (which may leave the
   window) can follow with the GPU renderer, whose surfaces have alpha. Example: `popover`.
-- [ ] **S** **Messages.** English and German catalogs like Kiesel Web's (the widgets' own strings: "Light",
-  "Dark", "Theme", "Loading"); the language from the system; number and date formatting through ICU4X (already
-  in the tree through parley).
+- [x] **S** **Messages.** Kiesel Web's catalogs, embedded as they are (`locales/<lang>/kiesel.json`, keys
+  `kiesel.<key>`), plus a small `desktop.json`; apps add their own (`add_catalog`). A MessageFormat 2 subset
+  covers every message they use: placeholders, `:number`, `:list`, `.input`, `.match` over several selectors
+  with exact keys, plural categories and `*`. The language comes from the environment (`KIESEL_LANG`, `LC_*`,
+  `LANG`) and is a signal: `t()`/`t_with()` texts follow it, so switching updates exactly the widgets showing
+  text. Plural rules, numbers and lists cover English and German; other languages and dates (ICU4X) when an app
+  needs them. Keep the catalogs in sync with Kiesel Web by copying them. Example: `i18n`.
 - [ ] **S** **System settings.** More of the portal's appearance: accent colour (`accent-color` → Kiesel's accent),
   contrast (→ `--ksl-contrast`), reduced motion (transitions to 1 ms, as on the web); font scale.
 - [ ] **S** **Shortcuts.** One keymap with platform modifiers (Ctrl, Cmd on macOS), shortcuts registered by

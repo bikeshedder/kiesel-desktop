@@ -24,6 +24,7 @@ use winit::cursor::CursorIcon;
 use winit::keyboard::{Key, NamedKey};
 
 use crate::anim::Transition;
+use crate::i18n::{IntoText, TextProp};
 use crate::paint;
 use crate::reactive::{MountCx, Watch};
 use crate::text::{self, Text};
@@ -46,8 +47,8 @@ pub struct TextField {
     run_ids: Vec<WidgetId>,
     value: ArcRwSignal<String>,
     watch: Option<Watch>,
-    placeholder: String,
-    label: String,
+    placeholder: TextProp,
+    label: TextProp,
     grow: bool,
     placeholder_layout: Option<parley::Layout<()>>,
     editor: PlainEditor<()>,
@@ -76,8 +77,8 @@ impl TextField {
             run_ids: vec![WidgetId::next()],
             value: ArcRwSignal::new(String::new()),
             watch: None,
-            placeholder: String::new(),
-            label: String::new(),
+            placeholder: TextProp::default(),
+            label: TextProp::default(),
             grow: false,
             placeholder_layout: None,
             editor: PlainEditor::new(16.0),
@@ -102,15 +103,15 @@ impl TextField {
         self
     }
 
-    pub fn placeholder(mut self, text: impl Into<String>) -> Self {
-        self.placeholder = text.into();
+    pub fn placeholder(mut self, text: impl IntoText) -> Self {
+        self.placeholder = TextProp::new(text);
         self
     }
 
     /// Its accessible name – what a screen reader announces. (A `Field` that
     /// shows a label and names its control comes later; until then, set both.)
-    pub fn label(mut self, text: impl Into<String>) -> Self {
-        self.label = text.into();
+    pub fn label(mut self, text: impl IntoText) -> Self {
+        self.label = TextProp::new(text);
         self
     }
 
@@ -347,7 +348,12 @@ impl Widget for TextField {
 
     fn mount(&mut self, cx: &mut MountCx<'_>) {
         let value = self.value.clone();
-        self.watch = Some(cx.watch(self.id, move || value.track()));
+        let (label, placeholder) = (self.label.signal(), self.placeholder.signal());
+        self.watch = Some(cx.watch(self.id, move || {
+            value.track();
+            label.track();
+            placeholder.track();
+        }));
     }
 
     /// Picks up a value set from outside (not by typing), and repaints after events
@@ -365,9 +371,18 @@ impl Widget for TextField {
                 style.line_height,
             )));
             self.synced.clear();
-            self.placeholder_layout =
-                (!self.placeholder.is_empty()).then(|| cx.text.line(&self.placeholder, &style));
+            self.placeholder_layout = None;
         }
+        // the placeholder: shaped at first, and again when its text changes
+        if self.placeholder.refresh()
+            || (self.placeholder_layout.is_none() && !self.placeholder.shown.is_empty())
+        {
+            let style = cx.theme.text_style(TextRole::Body);
+            self.placeholder_layout = (!self.placeholder.shown.is_empty())
+                .then(|| cx.text.line(&self.placeholder.shown, &style));
+            self.repaint = true;
+        }
+        self.repaint |= self.label.refresh();
         if self.value.with_untracked(|v| *v != self.synced) {
             self.synced = self.value.with_untracked(String::clone);
             self.editor.set_text(&self.synced);
@@ -549,11 +564,11 @@ impl Widget for TextField {
     fn accessibility(&self) -> Option<accesskit::Node> {
         let mut node = accesskit::Node::new(accesskit::Role::TextInput);
         node.set_value(self.synced.clone());
-        if !self.label.is_empty() {
-            node.set_label(self.label.clone());
+        if !self.label.shown.is_empty() {
+            node.set_label(self.label.shown.clone());
         }
-        if !self.placeholder.is_empty() {
-            node.set_placeholder(self.placeholder.clone());
+        if !self.placeholder.shown.is_empty() {
+            node.set_placeholder(self.placeholder.shown.clone());
         }
         node.set_bounds(accessible_rect(self.bounds));
         node.add_action(accesskit::Action::Focus);

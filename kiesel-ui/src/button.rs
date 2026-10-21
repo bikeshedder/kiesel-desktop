@@ -17,6 +17,7 @@ use winit::cursor::CursorIcon;
 use winit::keyboard::{Key, NamedKey};
 
 use crate::anim::Transition;
+use crate::i18n::{IntoText, TextProp};
 use crate::paint::{self, TOLERANCE};
 use crate::reactive::{MountCx, Watch};
 use crate::text;
@@ -33,9 +34,9 @@ const SPIN_PERIOD: f64 = 0.9;
 
 pub struct Button {
     id: WidgetId,
-    label: String,
+    label: TextProp,
     /// What assistive technology announces, if not the label
-    accessible_name: Option<String>,
+    accessible_name: Option<TextProp>,
     layout: Option<Layout<()>>,
     bounds: Rect,
     radius: f64,
@@ -60,10 +61,11 @@ pub struct Button {
 }
 
 impl Button {
-    pub fn new(label: impl Into<String>) -> Self {
+    /// `label`: a string, or a signal – `t("…")` follows the language
+    pub fn new(label: impl IntoText) -> Self {
         Self {
             id: WidgetId::next(),
-            label: label.into(),
+            label: TextProp::new(label),
             accessible_name: None,
             layout: None,
             bounds: Rect::ZERO,
@@ -94,8 +96,8 @@ impl Button {
 
     /// A name for assistive technology when the label alone is ambiguous – many
     /// "Remove" buttons in a list each say what they remove (`aria-label`)
-    pub fn accessible_name(mut self, name: impl Into<String>) -> Self {
-        self.accessible_name = Some(name.into());
+    pub fn accessible_name(mut self, name: impl IntoText) -> Self {
+        self.accessible_name = Some(TextProp::new(name));
         self
     }
 
@@ -137,7 +139,15 @@ impl Widget for Button {
 
     fn mount(&mut self, cx: &mut MountCx<'_>) {
         let loading = self.loading.clone();
-        self.watch = Some(cx.watch(self.id, move || loading.track()));
+        let label = self.label.signal();
+        let name = self.accessible_name.as_ref().map(TextProp::signal);
+        self.watch = Some(cx.watch(self.id, move || {
+            loading.track();
+            label.track();
+            if let Some(n) = &name {
+                n.track();
+            }
+        }));
     }
 
     /// Picks up `loading` (it changes the width) and repaints after events
@@ -152,6 +162,14 @@ impl Widget for Button {
             self.sync(cx.now, cx.theme);
             change = Change::LAYOUT;
         }
+        if self.label.refresh() {
+            // another text (another language): shape it again; the width may change
+            self.layout = None;
+            change = Change::LAYOUT;
+        }
+        if self.accessible_name.as_mut().is_some_and(TextProp::refresh) {
+            change |= Change::PAINT;
+        }
         if std::mem::take(&mut self.repaint) {
             change |= Change::PAINT;
         }
@@ -165,7 +183,7 @@ impl Widget for Button {
         let style = cx.theme.control_text();
         let layout = self
             .layout
-            .get_or_insert_with(|| cx.text.line(&self.label, &style));
+            .get_or_insert_with(|| cx.text.line(&self.label.shown, &style));
         let mut content = f64::from(layout.width());
         if self.shown_loading {
             content += SPINNER_BOX_EM * f64::from(m.font_size) + m.gap;
@@ -269,11 +287,8 @@ impl Widget for Button {
 
     fn accessibility(&self) -> Option<accesskit::Node> {
         let mut node = accesskit::Node::new(accesskit::Role::Button);
-        node.set_label(
-            self.accessible_name
-                .clone()
-                .unwrap_or_else(|| self.label.clone()),
-        );
+        let name = self.accessible_name.as_ref().unwrap_or(&self.label);
+        node.set_label(name.shown.clone());
         node.set_bounds(accessible_rect(self.bounds));
         node.add_action(accesskit::Action::Click);
         node.add_action(accesskit::Action::Focus);
