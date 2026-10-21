@@ -44,19 +44,46 @@ use winit::window::{
 };
 
 use crate::a11y::Accessibility;
+use crate::anim::EASE;
 use crate::clipboard::Clipboard;
 use crate::layout::Layout;
+use crate::reactive::Watch;
 use crate::reactive::{Inbox, MountCx};
 use crate::text::Text;
 use crate::theme::{Appearance, Scheme, Theme};
+use crate::theming::{ThemeMode, Theming};
 use crate::widget::{
     self, Event, EventCx, Ime, LayoutCx, PaintCx, Widget, WidgetId, accessibility_nodes,
 };
+use reactive_graph::traits::{GetUntracked, Track};
 
 pub struct Options {
     pub title: String,
+    /// Initial size of the window's content, in logical pixels
     pub size: Size,
     pub appearance: Appearance,
+    /// Light, dark or the system's preference – share it with a `ThemeSwitch`
+    pub theming: Theming,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            title: "Kiesel".into(),
+            size: Size::new(640.0, 480.0),
+            appearance: Appearance::default(),
+            theming: Theming::unsaved(),
+        }
+    }
+}
+
+/// A change of scheme cross-fades all colours, like the page background on the web
+const THEME_FADE: f64 = 0.3;
+
+struct Fade {
+    from: Theme,
+    to: Theme,
+    start: Instant,
 }
 
 /// Regions above this share of the window are rendered straight into the buffer
@@ -73,16 +100,16 @@ pub fn run(
     let inbox = Inbox::new(move || proxy.wake_up());
     let mut root: Box<dyn Widget> = Box::new(root);
     widget::mount_all(root.as_mut(), &mut MountCx { inbox: &inbox });
-    // KIESEL_THEME=light|dark overrides the system preference (tests, screenshots)
-    let forced = match std::env::var("KIESEL_THEME").as_deref() {
-        Ok("dark") => Some(Scheme::Dark),
-        Ok("light") => Some(Scheme::Light),
-        _ => None,
-    };
-    let scheme = forced.unwrap_or(Scheme::Light);
+    // the shell watches the scheme like a widget watches its signals
+    let scheme = options.theming.scheme();
+    let scheme_watch = MountCx { inbox: &inbox }.watch(WidgetId::WINDOW, {
+        let scheme = scheme.clone();
+        move || scheme.track()
+    });
     let app = Shell {
-        theme: Theme::new(scheme, &options.appearance),
-        forced,
+        theme: Theme::new(scheme.get_untracked(), &options.appearance),
+        fade: None,
+        _scheme_watch: scheme_watch,
         options,
         root,
         inbox,
@@ -124,7 +151,9 @@ pub fn run(
 struct Shell {
     options: Options,
     theme: Theme,
-    forced: Option<Scheme>,
+    /// The cross-fade to a new scheme, while it runs
+    fade: Option<Fade>,
+    _scheme_watch: Watch,
     root: Box<dyn Widget>,
     inbox: Arc<Inbox>,
     /// Widgets that got events since the last update
@@ -235,13 +264,16 @@ impl Shell {
     /// returns the ids needing layout
     fn collect_updates(&mut self) -> Vec<WidgetId> {
         let (mut relayout, mut repaint) = (Vec::new(), Vec::new());
+        let mut ids = std::mem::take(&mut self.touched);
+        ids.extend(self.inbox.take());
+        if ids.contains(&WidgetId::WINDOW) {
+            self.follow_scheme();
+        }
         let mut cx = LayoutCx {
             theme: &self.theme,
             text: &mut self.text,
             now: Instant::now(),
         };
-        let mut ids = std::mem::take(&mut self.touched);
-        ids.extend(self.inbox.take());
         if std::mem::take(&mut self.update_everything) {
             widget::update_all(self.root.as_mut(), &mut cx, &mut relayout, &mut repaint);
         } else {
@@ -564,20 +596,67 @@ impl Shell {
         });
     }
 
-    fn set_scheme(&mut self, theme: Option<WinitTheme>) {
-        let scheme = self.forced.unwrap_or(match theme {
-            Some(WinitTheme::Dark) => Scheme::Dark,
-            _ => Scheme::Light,
-        });
-        if scheme != self.theme.scheme {
-            self.theme = Theme::new(scheme, &self.options.appearance);
-            self.invalidate_all();
+    /// The effective scheme changed: fade to it from whatever is on screen
+    fn follow_scheme(&mut self) {
+        let scheme = self.options.theming.scheme().get_untracked();
+        let heading_to = self
+            .fade
+            .as_ref()
+            .map_or(self.theme.scheme, |f| f.to.scheme);
+        if scheme != heading_to {
+            self.fade = Some(Fade {
+                from: self.theme.clone(),
+                to: Theme::new(scheme, &self.options.appearance),
+                start: Instant::now(),
+            });
+            self.full_damage = true;
+            self.request_redraw();
         }
+        self.sync_window_theme();
+    }
+
+    /// Window decorations drawn by the platform follow along. On Linux the
+    /// preference comes from the portal, and winit's theme is only that of its
+    /// own decorations; elsewhere `None` lets the window follow the system.
+    fn sync_window_theme(&self) {
+        let Some(s) = &self.window else { return };
+        let winit_theme = |scheme| match scheme {
+            Scheme::Light => WinitTheme::Light,
+            Scheme::Dark => WinitTheme::Dark,
+        };
+        let follows_system = self.options.theming.mode().get_untracked() == ThemeMode::System;
+        let theme = if cfg!(target_os = "linux") || !follows_system {
+            Some(winit_theme(self.options.theming.scheme().get_untracked()))
+        } else {
+            None
+        };
+        s.window().set_theme(theme);
+    }
+
+    /// Where winit reports the system's preference (not on Linux, see above)
+    fn system_theme(&self, theme: Option<WinitTheme>) {
+        if cfg!(target_os = "linux") {
+            return;
+        }
+        self.options.theming.set_system(theme.map(|t| match t {
+            WinitTheme::Dark => Scheme::Dark,
+            _ => Scheme::Light,
+        }));
     }
 
     fn redraw(&mut self) {
         let start = Instant::now();
         let now = Instant::now();
+        if let Some(f) = &self.fade {
+            let t = now.duration_since(f.start).as_secs_f64() / THEME_FADE;
+            if t >= 1.0 {
+                self.theme = f.to.clone();
+                self.fade = None;
+            } else {
+                self.theme = Theme::mix(&f.from, &f.to, EASE.ease(t) as f32);
+            }
+            self.full_damage = true;
+        }
         // animating widgets need their ink redrawn – and those that animated
         // last frame once more, so a transition that just ended shows its end
         let mut animating = Vec::new();
@@ -720,7 +799,7 @@ impl Shell {
                 start.elapsed().as_secs_f64() * 1e3
             );
         }
-        if !animating.is_empty() || !self.animating.is_empty() {
+        if !animating.is_empty() || !self.animating.is_empty() || self.fade.is_some() {
             surface.window().request_redraw();
         }
     }
@@ -752,7 +831,8 @@ impl ApplicationHandler for Shell {
             self.clipboard = Clipboard::new(display.as_raw());
         }
         self.a11y = Some(Accessibility::new(event_loop.create_proxy()));
-        self.set_scheme(theme);
+        self.system_theme(theme);
+        self.sync_window_theme();
         self.invalidate_all();
         self.changed();
     }
@@ -796,7 +876,7 @@ impl ApplicationHandler for Shell {
                 self.changed();
             }
             WindowEvent::ThemeChanged(theme) => {
-                self.set_scheme(Some(theme));
+                self.system_theme(Some(theme));
                 self.changed();
             }
             WindowEvent::Focused(focused) => {

@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Options {
             title: "Kiesel – Dialog".into(),
             size: Size::new(560.0, 400.0),
-            appearance: Default::default(),
+            ..Default::default()
         },
         root,
     )

@@ -649,7 +649,8 @@ impl Widget for TextField {
             }
         }
         let since = now.duration_since(self.blink_from);
-        let caret_on = since >= BLINK_FOR || (since.as_millis() / BLINK.as_millis()).is_multiple_of(2);
+        let caret_on =
+            since >= BLINK_FOR || (since.as_millis() / BLINK.as_millis()).is_multiple_of(2);
         if self.focused
             && caret_on
             && let Some(b) = self.editor.cursor_geometry(CARET_WIDTH)

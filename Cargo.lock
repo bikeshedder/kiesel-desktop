@@ -1181,6 +1181,7 @@ dependencies = [
  "taffy",
  "vello_cpu",
  "winit",
+ "zbus",
 ]
 
 [[package]]

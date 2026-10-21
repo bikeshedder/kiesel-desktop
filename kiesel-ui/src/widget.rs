@@ -479,6 +479,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_centred_label_keeps_its_line() {
+        // a fractional text width must not lose its last word to rounding
+        let label = Label::caption("Following the system (dark)");
+        let id = label.id();
+        let mut card = Card::new().max_width(420.0).child(
+            Flex::stack()
+                .align(crate::Align::Center)
+                .child(Button::new("x"))
+                .child(label),
+        );
+        lay_out(&mut card, Size::new(520.0, 400.0));
+        assert_eq!(
+            find(&card, id).unwrap().bounds().height(),
+            18.0,
+            "one line of 12 px × 1.5"
+        );
+    }
+
+    #[test]
     fn labels_wrap_to_the_card() {
         let text =
             "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor.";

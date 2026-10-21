@@ -104,11 +104,13 @@ impl Widget for Label {
             taffy::AvailableSpace::MaxContent => widths.max,
             taffy::AvailableSpace::Definite(w) => w.min(widths.max),
         });
-        // the box is as wide as offered (block-like); its height follows the lines
+        // the box is as wide as offered (block-like); its height follows the lines.
+        // Whole pixels, rounded up: taffy rounds boxes, and a box a fraction
+        // narrower than its line would wrap the last word
         let size = self.wrap_at(cx, width);
         Size::new(
-            f64::from(known.width.unwrap_or(size.width as f32)),
-            known.height.map_or(size.height, f64::from),
+            f64::from(known.width.unwrap_or(size.width as f32)).ceil(),
+            known.height.map_or(size.height, f64::from).ceil(),
         )
     }
 

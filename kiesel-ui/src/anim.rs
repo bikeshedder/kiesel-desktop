@@ -5,6 +5,88 @@ use std::time::Instant;
 /// `--ksl-ease` = Open Props `--ease-3`: cubic-bezier(.25, 0, .3, 1)
 pub const EASE: CubicBezier = CubicBezier::new(0.25, 0.0, 0.3, 1.0);
 
+/// `--ksl-ease-spring` = Open Props `--ease-spring-3`, a CSS `linear()` curve that
+/// overshoots to 1.16 and settles: (output, input position if given)
+const SPRING_3: &[(f64, Option<f64>)] = &[
+    (0.0, None),
+    (0.009, None),
+    (0.035, Some(0.021)),
+    (0.141, Some(0.044)),
+    (0.723, Some(0.129)),
+    (0.938, Some(0.167)),
+    (1.017, None),
+    (1.077, None),
+    (1.121, None),
+    (1.149, Some(0.243)),
+    (1.159, None),
+    (1.163, None),
+    (1.161, None),
+    (1.154, Some(0.299)),
+    (1.129, Some(0.328)),
+    (1.051, Some(0.396)),
+    (1.017, Some(0.431)),
+    (0.991, None),
+    (0.977, Some(0.51)),
+    (0.974, Some(0.538)),
+    (0.975, Some(0.571)),
+    (0.997, Some(0.698)),
+    (1.003, Some(0.769)),
+    (1.0, None),
+];
+
+/// How a transition's progress maps to its value
+#[derive(Clone, Copy, Debug)]
+pub enum Easing {
+    Cubic(CubicBezier),
+    /// CSS `linear()`: points (output, input), straight lines between them
+    Linear(&'static [(f64, Option<f64>)]),
+}
+
+impl Easing {
+    pub const EASE: Self = Self::Cubic(EASE);
+    pub const SPRING: Self = Self::Linear(SPRING_3);
+
+    pub fn ease(&self, x: f64) -> f64 {
+        match self {
+            Self::Cubic(c) => c.ease(x),
+            Self::Linear(points) => linear(points, x.clamp(0.0, 1.0)),
+        }
+    }
+}
+
+/// CSS `linear()`: the first point sits at 0 and the last at 1 unless given;
+/// points without a position are spread evenly between their neighbours
+fn linear(points: &[(f64, Option<f64>)], x: f64) -> f64 {
+    let n = points.len();
+    let mut at: Vec<Option<f64>> = points.iter().map(|p| p.1).collect();
+    at[0] = Some(at[0].unwrap_or(0.0));
+    at[n - 1] = Some(at[n - 1].unwrap_or(1.0));
+    let mut i = 0;
+    while i < n {
+        if at[i].is_some() {
+            i += 1;
+            continue;
+        }
+        let (prev, mut next) = (i - 1, i);
+        while at[next].is_none() {
+            next += 1;
+        }
+        let (a, b) = (at[prev].unwrap(), at[next].unwrap());
+        for (k, slot) in at.iter_mut().enumerate().take(next).skip(i) {
+            *slot = Some(a + (b - a) * (k - prev) as f64 / (next - prev) as f64);
+        }
+        i = next;
+    }
+    for w in 0..n - 1 {
+        let (x0, x1) = (at[w].unwrap(), at[w + 1].unwrap());
+        if x <= x1 {
+            let t = if x1 > x0 { (x - x0) / (x1 - x0) } else { 1.0 };
+            return points[w].0 + (points[w + 1].0 - points[w].0) * t;
+        }
+    }
+    points[n - 1].0
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct CubicBezier {
     x1: f64,
@@ -62,6 +144,7 @@ pub struct Transition {
     from: f64,
     to: f64,
     start: Option<Instant>,
+    easing: Easing,
 }
 
 impl Transition {
@@ -70,7 +153,18 @@ impl Transition {
             from: value,
             to: value,
             start: None,
+            easing: Easing::EASE,
         }
+    }
+
+    pub const fn with_easing(mut self, easing: Easing) -> Self {
+        self.easing = easing;
+        self
+    }
+
+    /// The value it is heading to
+    pub fn target(&self) -> f64 {
+        self.to
     }
 
     /// Returns true if the target changed (a transition starts)
@@ -92,7 +186,7 @@ impl Transition {
         if t >= 1.0 {
             return self.to;
         }
-        self.from + (self.to - self.from) * EASE.ease(t)
+        self.from + (self.to - self.from) * self.easing.ease(t)
     }
 
     pub fn animating(&self, now: Instant, duration: f64) -> bool {
@@ -104,6 +198,17 @@ impl Transition {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spring_overshoots_and_settles() {
+        let s = Easing::SPRING;
+        assert_eq!(s.ease(0.0), 0.0);
+        assert_eq!(s.ease(1.0), 1.0);
+        // the unpositioned points are spread out: 1.017, 1.077, 1.121 fall between 16.7 % and 24.3 %
+        assert!((s.ease(0.186) - 1.017).abs() < 1e-9);
+        assert!((s.ease(0.275) - 1.163).abs() < 1e-3, "the peak");
+        assert!((s.ease(0.129) - 0.723).abs() < 1e-9);
+    }
 
     #[test]
     fn ease_endpoints_and_monotonic() {

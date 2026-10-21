@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Options {
             title: "Kiesel – Button".into(),
             size: Size::new(480.0, 300.0),
-            appearance: Default::default(),
+            ..Default::default()
         },
         root,
     )

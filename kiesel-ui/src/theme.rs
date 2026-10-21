@@ -101,6 +101,15 @@ pub struct Theme {
     pub field_shadow_hover: [Shadow; 3],
     /// `--ksl-field-shadow-focus`: the edge in the accent, a 3px ring at 22 %
     pub field_shadow_focus: [Shadow; 3],
+    /// `--ksl-icon`: icons that aren't text
+    pub icon: Color,
+    /// `--ksl-hi`, `--ksl-lo-strong`: the light and the dark of Soft UI depth
+    pub hi: Color,
+    pub lo_strong: Color,
+    /// `--ksl-rim`: a fine light edge around wells
+    pub rim: Color,
+    /// `--ksl-knob`: the 145° gradient of round knobs (0 %, 55 %, 100 %)
+    pub knob: [Color; 3],
     pub metrics: Metrics,
 }
 
@@ -175,6 +184,9 @@ impl Theme {
             field_bg,
             field_edge,
             field_inner,
+            icon,
+            rim,
+            knob,
         ) = match scheme {
             Scheme::Light => (
                 n(0.949, 0.0058),
@@ -196,6 +208,13 @@ impl Theme {
                 n(0.930, 0.0087),
                 oklch(0.374, 0.0353 * t, hue, 0.24),
                 oklch(0.374, 0.0353 * t, hue, 0.10),
+                n(0.600, 0.0280),
+                white(0.7),
+                [
+                    Color::from_rgb8(0xff, 0xff, 0xff),
+                    n(0.955, 0.0058),
+                    n(0.924, 0.0087),
+                ],
             ),
             Scheme::Dark => (
                 n(0.275, 0.0240),
@@ -217,6 +236,9 @@ impl Theme {
                 n(0.240, 0.0210),
                 oklch(0.090, 0.0100 * t, hue, 0.55),
                 oklch(0.090, 0.0100 * t, hue, 0.35),
+                n(0.660, 0.0260),
+                white(0.05),
+                [n(0.695, 0.0298), n(0.646, 0.0304), n(0.600, 0.0324)],
             ),
         };
 
@@ -265,6 +287,11 @@ impl Theme {
                     ..outer(0.0, 0.0, 0.0, accent.multiply_alpha(0.22))
                 },
             ),
+            icon,
+            hi,
+            lo_strong,
+            rim,
+            knob,
             metrics: Metrics {
                 control: 40.0 * f64::from(ap.density),
                 radius: 6.0 * f64::from(ap.roundness),
@@ -280,12 +307,71 @@ impl Theme {
     }
 }
 
+impl Theme {
+    /// Between two themes, colours mixed in oklab – for the cross-fade when the
+    /// scheme changes. Sizes come from `b`; the scheme flips half-way.
+    pub fn mix(a: &Theme, b: &Theme, t: f32) -> Theme {
+        use crate::paint::lerp_shadows as sh;
+        let c = |x: Color, y: Color| mix(x, y, t);
+        let t64 = f64::from(t);
+        Theme {
+            scheme: if t < 0.5 { a.scheme } else { b.scheme },
+            bg: c(a.bg, b.bg),
+            surface_sunken: c(a.surface_sunken, b.surface_sunken),
+            card_bg: c(a.card_bg, b.card_bg),
+            text_1: c(a.text_1, b.text_1),
+            text_2: c(a.text_2, b.text_2),
+            text_3: c(a.text_3, b.text_3),
+            accent: c(a.accent, b.accent),
+            accent_2: c(a.accent_2, b.accent_2),
+            control_bg: [
+                c(a.control_bg[0], b.control_bg[0]),
+                c(a.control_bg[1], b.control_bg[1]),
+            ],
+            control_bg_hover: [
+                c(a.control_bg_hover[0], b.control_bg_hover[0]),
+                c(a.control_bg_hover[1], b.control_bg_hover[1]),
+            ],
+            control_shadow: sh(&a.control_shadow, &b.control_shadow, t64),
+            control_shadow_hover: sh(&a.control_shadow_hover, &b.control_shadow_hover, t64),
+            control_shadow_pressed: sh(&a.control_shadow_pressed, &b.control_shadow_pressed, t64),
+            focus_ring: sh(&[a.focus_ring], &[b.focus_ring], t64)[0],
+            accent_soft: c(a.accent_soft, b.accent_soft),
+            field_bg: c(a.field_bg, b.field_bg),
+            field_shadow: sh(&a.field_shadow, &b.field_shadow, t64),
+            field_shadow_hover: sh(&a.field_shadow_hover, &b.field_shadow_hover, t64),
+            field_shadow_focus: sh(&a.field_shadow_focus, &b.field_shadow_focus, t64),
+            icon: c(a.icon, b.icon),
+            hi: c(a.hi, b.hi),
+            lo_strong: c(a.lo_strong, b.lo_strong),
+            rim: c(a.rim, b.rim),
+            knob: [
+                c(a.knob[0], b.knob[0]),
+                c(a.knob[1], b.knob[1]),
+                c(a.knob[2], b.knob[2]),
+            ],
+            metrics: b.metrics,
+        }
+    }
+}
+
 /// The Open Props spacing steps used by Kiesel (`--size-1` … `--size-10`), in logical pixels
 pub fn space(step: u8) -> f64 {
     const STEPS: [f64; 11] = [
         0.0, 4.0, 8.0, 16.0, 20.0, 24.0, 28.0, 32.0, 48.0, 64.0, 80.0,
     ];
     STEPS[usize::from(step.min(10))]
+}
+
+/// Control sizes as in Kiesel (`xs` … `xl`)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ControlSize {
+    Xs,
+    Sm,
+    #[default]
+    Md,
+    Lg,
+    Xl,
 }
 
 /// Text roles of the type scale

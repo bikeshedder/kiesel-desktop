@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Options {
             title: "Kiesel – Form".into(),
             size: Size::new(520.0, 360.0),
-            appearance: Default::default(),
+            ..Default::default()
         },
         root,
     )
