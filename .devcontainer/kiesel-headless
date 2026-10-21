@@ -208,7 +208,14 @@ if "=" in args:
 elif verb == "set":
     sys.exit("a11y set <name> = <value>")
 name = " ".join(args)
-acc = find(desktop, name, role)
+# nodes added a moment ago may not have reached the registry yet: ask again briefly
+import time
+for _ in range(10):
+    acc = find(desktop, name, role)
+    if acc is not None:
+        break
+    time.sleep(0.1)
+    desktop = pyatspi.Registry.getDesktop(0)
 if acc is None:
     sys.exit(f"no accessible named {name!r}")
 if verb == "click":
