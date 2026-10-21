@@ -1,3 +1,17 @@
 {
-  "themeSwitch.label": "Design"
+  "themeSwitch.label": "Design",
+  "keys.ctrl": "Strg",
+  "keys.alt": "Alt",
+  "keys.shift": "Umschalt",
+  "keys.enter": "Eingabe",
+  "keys.escape": "Esc",
+  "keys.backspace": "Rücktaste",
+  "keys.delete": "Entf",
+  "keys.tab": "Tab",
+  "keys.space": "Leertaste",
+  "keys.pageUp": "Bild auf",
+  "keys.pageDown": "Bild ab",
+  "keys.home": "Pos1",
+  "keys.end": "Ende",
+  "keys.insert": "Einfg"
 }

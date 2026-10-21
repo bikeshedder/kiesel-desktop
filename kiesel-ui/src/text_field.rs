@@ -27,6 +27,7 @@ use crate::anim::Transition;
 use crate::i18n::{IntoText, TextProp};
 use crate::paint;
 use crate::reactive::{MountCx, Watch};
+use crate::shortcut::{KeyPress, Mods, Shortcut};
 use crate::text::{self, Text};
 use crate::theme::{TextRole, TextStyle, Theme, space};
 use crate::widget::{
@@ -40,6 +41,15 @@ type OnSubmit = Box<dyn FnMut(&str)>;
 const BLINK: Duration = Duration::from_millis(500);
 const BLINK_FOR: Duration = Duration::from_secs(10);
 const CARET_WIDTH: f32 = 1.5;
+
+/// Editing commands with platform shortcuts
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Edit {
+    SelectAll,
+    Copy,
+    Cut,
+    Paste,
+}
 
 pub struct TextField {
     id: WidgetId,
@@ -188,8 +198,21 @@ impl TextField {
     }
 
     /// A key while focused; true if it was handled
-    fn key(&mut self, cx: &mut EventCx<'_>, key: &Key, typed: Option<&str>) -> bool {
+    fn key(&mut self, cx: &mut EventCx<'_>, press: &KeyPress, typed: Option<&str>) -> bool {
         let (shift, ctrl) = (cx.modifiers.shift_key(), cx.modifiers.control_key());
+        let edit = [
+            (Shortcut::select_all(), Edit::SelectAll),
+            (Shortcut::copy(), Edit::Copy),
+            (Shortcut::cut(), Edit::Cut),
+            (Shortcut::paste(), Edit::Paste),
+        ]
+        .into_iter()
+        .find_map(|(s, e)| s.matches(press).then_some(e));
+        if let Some(edit) = edit {
+            self.edit(cx, edit);
+            return true;
+        }
+        let key = &press.key;
         let (fonts, layouts) = cx.text.contexts();
         let mut d = self.editor.driver(fonts, layouts);
         match key {
@@ -220,30 +243,10 @@ impl TextField {
                 }
                 return true;
             }
-            Key::Character(c) if ctrl => match c.as_str() {
-                "a" => d.select_all(),
-                "c" | "x" => {
-                    if let Some(sel) = self.editor.selected_text().map(str::to_owned) {
-                        cx.clipboard.set(&sel);
-                        if c == "x" {
-                            let (fonts, layouts) = cx.text.contexts();
-                            self.editor.driver(fonts, layouts).delete_selection();
-                        }
-                    }
-                }
-                "v" => {
-                    if let Some(pasted) = cx.clipboard.get() {
-                        // one line: line breaks become spaces
-                        let pasted = pasted.replace(['\r', '\n'], " ");
-                        let (fonts, layouts) = cx.text.contexts();
-                        self.editor
-                            .driver(fonts, layouts)
-                            .insert_or_replace_selection(&pasted);
-                    }
-                }
-                _ => return false,
-            },
-            _ if !ctrl && !cx.modifiers.alt_key() => {
+            _ if !Mods::held(cx.modifiers).contains(Mods::PRIMARY)
+                && !ctrl
+                && !cx.modifiers.alt_key() =>
+            {
                 let Some(typed) = typed.filter(|t| !t.chars().any(char::is_control)) else {
                     return false;
                 };
@@ -252,6 +255,31 @@ impl TextField {
             _ => return false,
         }
         true
+    }
+
+    /// Select all and the clipboard
+    fn edit(&mut self, cx: &mut EventCx<'_>, edit: Edit) {
+        let (fonts, layouts) = cx.text.contexts();
+        let mut d = self.editor.driver(fonts, layouts);
+        match edit {
+            Edit::SelectAll => d.select_all(),
+            Edit::Copy | Edit::Cut => {
+                if let Some(sel) = self.editor.selected_text().map(str::to_owned) {
+                    cx.clipboard.set(&sel);
+                    if edit == Edit::Cut {
+                        let (fonts, layouts) = cx.text.contexts();
+                        self.editor.driver(fonts, layouts).delete_selection();
+                    }
+                }
+            }
+            Edit::Paste => {
+                if let Some(pasted) = cx.clipboard.get() {
+                    // one line: line breaks become spaces
+                    let pasted = pasted.replace(['\r', '\n'], " ");
+                    d.insert_or_replace_selection(&pasted);
+                }
+            }
+        }
     }
 
     /// Editor coordinates of a window point
@@ -519,8 +547,9 @@ impl Widget for TextField {
                 }
                 self.edited(cx);
             }
-            Event::KeyDown { key, text, .. } => {
-                if self.key(cx, key, text.as_deref()) {
+            Event::KeyDown { text, .. } => {
+                let press = cx.press(event).expect("a key press");
+                if self.key(cx, &press, text.as_deref()) {
                     cx.handled = true;
                     self.edited(cx);
                 }
@@ -697,7 +726,7 @@ impl Widget for TextField {
 #[cfg(test)]
 mod tests {
     use reactive_graph::traits::GetUntracked;
-    use winit::keyboard::ModifiersState;
+    use winit::keyboard::{ModifiersState, NativeKeyCode, PhysicalKey};
 
     use super::*;
     use crate::clipboard::Clipboard;
@@ -765,7 +794,9 @@ mod tests {
             let text = text.map(str::to_string);
             self.send(
                 Event::KeyDown {
+                    plain: key.clone(),
                     key,
+                    code: PhysicalKey::Unidentified(NativeKeyCode::Unidentified),
                     repeat: false,
                     text,
                 },

@@ -11,10 +11,11 @@ use std::time::Instant;
 use vello_cpu::kurbo::{Point, Rect, Size, Vec2};
 use vello_cpu::{RenderContext, Resources};
 use winit::cursor::CursorIcon;
-use winit::keyboard::{Key, ModifiersState};
+use winit::keyboard::{Key, ModifiersState, PhysicalKey};
 
 use crate::clipboard::Clipboard;
 use crate::reactive::MountCx;
+use crate::shortcut::{KeyPress, Shortcut};
 use crate::text::Text;
 use crate::theme::Theme;
 
@@ -50,6 +51,10 @@ pub enum Event {
     PointerUp(Point),
     KeyDown {
         key: Key,
+        /// The same key without modifiers, and where it is: for shortcuts – see
+        /// [`EventCx::press`]
+        plain: Key,
+        code: PhysicalKey,
         repeat: bool,
         /// What the key types, if anything (layout, dead keys and compose applied)
         text: Option<String>,
@@ -72,6 +77,8 @@ pub enum Event {
     Ime(Ime),
     /// Wheel or touchpad over it (or over a child that didn't take it)
     Scroll(ScrollDelta),
+    /// One of its [`Widget::shortcuts`] was pressed (and no focused widget used it)
+    Shortcut(Shortcut),
 }
 
 /// How far to scroll, in logical pixels or lines; positive = towards the end
@@ -161,6 +168,23 @@ pub struct EventCx<'a> {
     /// Set by a widget that used the event: keys and scrolling go on to the
     /// ancestors until one does
     pub handled: bool,
+}
+
+impl EventCx<'_> {
+    /// A key press as shortcuts see it: `cx.press(event).is_some_and(|p| Shortcut::copy().matches(&p))`
+    pub fn press(&self, event: &Event) -> Option<KeyPress> {
+        match event {
+            Event::KeyDown {
+                key, plain, code, ..
+            } => Some(KeyPress {
+                key: key.clone(),
+                plain: plain.clone(),
+                code: *code,
+                mods: self.modifiers,
+            }),
+            _ => None,
+        }
+    }
 }
 
 /// What changed since the last update – reported by [`Widget::update`]
@@ -323,6 +347,12 @@ pub trait Widget: AsAny {
         false
     }
 
+    /// Shortcuts it answers wherever focus is, with [`Event::Shortcut`] – while
+    /// it is in the tree (inside an open popup, before the window's own)
+    fn shortcuts(&self) -> &[Shortcut] {
+        &[]
+    }
+
     /// Takes text input: the shell turns the input method on while it is focused
     fn accepts_text(&self) -> bool {
         false
@@ -360,6 +390,16 @@ pub trait Widget: AsAny {
     fn accessibility_children(&self) -> Vec<(accesskit::NodeId, accesskit::Node)> {
         Vec::new()
     }
+}
+
+/// The first widget under `w`, in tree order, with a shortcut for this press
+pub(crate) fn shortcut_owner(w: &dyn Widget, press: &KeyPress) -> Option<(WidgetId, Shortcut)> {
+    if let Some(s) = w.shortcuts().iter().find(|s| s.matches(press)) {
+        return Some((w.id(), s.clone()));
+    }
+    w.children()
+        .iter()
+        .find_map(|c| shortcut_owner(c.as_ref(), press))
 }
 
 /// Preorder walk over a tree

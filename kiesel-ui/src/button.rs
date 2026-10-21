@@ -20,6 +20,7 @@ use crate::anim::Transition;
 use crate::i18n::{IntoText, TextProp};
 use crate::paint::{self, TOLERANCE};
 use crate::reactive::{MountCx, Watch};
+use crate::shortcut::{IntoShortcut, Shortcut};
 use crate::text;
 use crate::theme::{Color, TextStyle, Theme, mix};
 use crate::widget::{
@@ -48,6 +49,8 @@ pub struct Button {
     shown_loading: bool,
     spin_start: Instant,
     on_click: Option<Box<dyn FnMut()>>,
+    /// Press it from anywhere in the window
+    shortcuts: Vec<Shortcut>,
     hovered: bool,
     /// Pointer went down on the button and hasn't been released yet
     pointer_armed: bool,
@@ -77,6 +80,7 @@ impl Button {
             watch: None,
             shown_loading: false,
             spin_start: Instant::now(),
+            shortcuts: Vec::new(),
             on_click: None,
             hovered: false,
             pointer_armed: false,
@@ -101,6 +105,13 @@ impl Button {
     /// "Remove" buttons in a list each say what they remove (`aria-label`)
     pub fn accessible_name(mut self, name: impl IntoText) -> Self {
         self.accessible_name = Some(TextProp::new(name));
+        self
+    }
+
+    /// Clicks it from anywhere in the window – unless the focused widget uses
+    /// the keys itself (Ctrl+A in a text field). "Primary" is Ctrl, or ⌘ on macOS.
+    pub fn shortcut(mut self, shortcut: impl IntoShortcut) -> Self {
+        self.shortcuts.push(shortcut.into_shortcut());
         self
     }
 
@@ -230,6 +241,10 @@ impl Widget for Button {
         true
     }
 
+    fn shortcuts(&self) -> &[Shortcut] {
+        &self.shortcuts
+    }
+
     fn event(&mut self, cx: &mut EventCx<'_>, event: &Event) {
         // Space and Enter press it; other keys go on to the ancestors
         if let Event::KeyDown { key, .. } | Event::KeyUp { key } = event
@@ -268,7 +283,7 @@ impl Widget for Button {
                     self.key_armed = false;
                 }
             }
-            Event::Activate => self.activate(),
+            Event::Activate | Event::Shortcut(_) => self.activate(),
             _ => {}
         }
         self.sync(cx.now, cx.theme);
@@ -299,6 +314,9 @@ impl Widget for Button {
         node.add_action(accesskit::Action::Focus);
         if self.shown_loading {
             node.set_busy();
+        }
+        if let Some(s) = self.shortcuts.first() {
+            node.set_keyboard_shortcut(s.label());
         }
         Some(node)
     }

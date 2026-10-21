@@ -51,6 +51,7 @@ use crate::layout::Layout;
 use crate::popup::{Command, PopupQueue, Root};
 use crate::reactive::Watch;
 use crate::reactive::{Inbox, MountCx};
+use crate::shortcut::{KeyPress, Shortcuts};
 use crate::text::Text;
 use crate::theme::{Appearance, Scheme, Theme};
 use crate::theming::{ThemeMode, Theming};
@@ -67,6 +68,9 @@ pub struct Options {
     pub appearance: Appearance,
     /// Light, dark or the system's preference – share it with a `ThemeSwitch`
     pub theming: Theming,
+    /// The app's shortcuts: last in line, after the focused widget and the
+    /// widgets' own ([`Widget::shortcuts`](crate::Widget::shortcuts))
+    pub shortcuts: Shortcuts,
 }
 
 impl Default for Options {
@@ -76,6 +80,7 @@ impl Default for Options {
             size: Size::new(640.0, 480.0),
             appearance: Appearance::default(),
             theming: Theming::unsaved(),
+            shortcuts: Shortcuts::new(),
         }
     }
 }
@@ -750,7 +755,28 @@ impl Shell {
             self.changed();
             return;
         }
-        let Some(focused) = self.focused else { return };
+        let press = KeyPress {
+            key: event.logical_key.clone(),
+            plain: event.key_without_modifiers.clone(),
+            code: event.physical_key,
+            mods: self.modifiers,
+        };
+        if let Some(focused) = self.focused
+            && self.focused_key(focused, event)
+        {
+            self.changed();
+            return;
+        }
+        if down {
+            self.shortcut(&press);
+        }
+        self.changed();
+    }
+
+    /// Keys go to the focused widget, and those it doesn't use to its ancestors
+    /// (PageDown to a scroll view); true if one used it
+    fn focused_key(&mut self, focused: WidgetId, event: KeyEvent) -> bool {
+        let down = event.state == ElementState::Pressed;
         if down
             && !matches!(event.logical_key, Key::Named(k) if is_modifier(k))
             && !self.focus_visible
@@ -768,6 +794,8 @@ impl Shell {
         let ev = if down {
             Event::KeyDown {
                 key: event.logical_key,
+                plain: event.key_without_modifiers,
+                code: event.physical_key,
                 repeat: event.repeat,
                 text: event.text.map(|t| t.to_string()),
             }
@@ -776,9 +804,33 @@ impl Shell {
                 key: event.logical_key,
             }
         };
-        // keys the focused widget doesn't use go to its ancestors (PageDown to a scroll view)
-        self.send_bubbling(focused, ev);
-        self.changed();
+        self.send_bubbling(focused, ev)
+    }
+
+    /// A shortcut no focused widget used: the widgets' own, the topmost popup's
+    /// first, then the app's
+    fn shortcut(&mut self, press: &KeyPress) {
+        let owner = self
+            .root
+            .as_ref()
+            .children()
+            .iter()
+            .rev()
+            .filter(|c| {
+                !self
+                    .root
+                    .layers()
+                    .any(|l| l.id() == c.id() && l.is_closing())
+            })
+            .find_map(|c| widget::shortcut_owner(c.as_ref(), press));
+        match owner {
+            Some((id, shortcut)) => {
+                self.send(id, Event::Shortcut(shortcut));
+            }
+            None => {
+                self.options.shortcuts.run(press);
+            }
+        }
     }
 
     /// Wheel and touchpad: to the widget under the pointer, up until one scrolls

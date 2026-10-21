@@ -64,8 +64,14 @@ Without these, every widget after Field and Checkbox would be built twice.
   motion (`reduced-motion` or GNOME's `enable-animations`: no transitions, fades, glides or popup animations;
   the theme changes in a cut) and text scale (GNOME's `text-scaling-factor`: text is shaped again at once, and
   controls grow with it, as on GTK). Tested with `tests/settings-demo.sh`.
-- [ ] **S** **Shortcuts.** One keymap with platform modifiers (Ctrl, Cmd on macOS), shortcuts registered by
-  widgets and the app, display strings for menus and `Kbd`.
+- [x] **S** **Shortcuts.** `Shortcut` with platform modifiers ("Primary" is Ctrl, ⌘ on macOS), parsed from
+  "Primary+Shift+Z"; matched by the key without modifiers, Shift-made symbols ("Primary++") and, on layouts
+  without Latin letters, the US key position (Ctrl+C on a Russian layout). A press goes to the focused widget
+  and its ancestors first (a field keeps Ctrl+A), then to widgets that registered it (`Widget::shortcuts`,
+  `Button::shortcut`) – the topmost popup's before the window's – then to the app's (`Options::shortcuts`).
+  Labels the platform's way and localised ("Ctrl+Shift+S", "Strg+Umschalt+S", "⇧⌘S"); `Kbd` shows them.
+  TextField's clipboard keys use the same keymap. Open: macOS word movement (⌥), user-configurable keymaps,
+  and AT-SPI key bindings (AccessKit leaves them empty on Linux). Example: `shortcuts`.
 - [ ] **S** **Icons.** A script that takes the icons an app uses from the Lucide package into Rust data, with
   Lucide's licence notice; an `Icon` widget; icons in Button (leading, trailing, icon-only).
 

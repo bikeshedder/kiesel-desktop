@@ -112,8 +112,9 @@ pub struct Theme {
     pub field_shadow_focus: [Shadow; 3],
     /// `--ksl-icon`: icons that aren't text
     pub icon: Color,
-    /// `--ksl-hi`, `--ksl-lo-strong`: the light and the dark of Soft UI depth
+    /// `--ksl-hi`, `--ksl-lo`, `--ksl-lo-strong`: the light and the dark of Soft UI depth
     pub hi: Color,
+    pub lo: Color,
     pub lo_strong: Color,
     /// `--ksl-rim`: a fine light edge around wells
     pub rim: Color,
@@ -322,6 +323,7 @@ impl Theme {
             ),
             icon,
             hi,
+            lo,
             lo_strong,
             rim,
             knob,
@@ -387,6 +389,7 @@ impl Theme {
             field_shadow_focus: sh(&a.field_shadow_focus, &b.field_shadow_focus, t64),
             icon: c(a.icon, b.icon),
             hi: c(a.hi, b.hi),
+            lo: c(a.lo, b.lo),
             lo_strong: c(a.lo_strong, b.lo_strong),
             rim: c(a.rim, b.rim),
             knob: [

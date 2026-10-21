@@ -1,3 +1,17 @@
 {
-  "themeSwitch.label": "Theme"
+  "themeSwitch.label": "Theme",
+  "keys.ctrl": "Ctrl",
+  "keys.alt": "Alt",
+  "keys.shift": "Shift",
+  "keys.enter": "Enter",
+  "keys.escape": "Esc",
+  "keys.backspace": "Backspace",
+  "keys.delete": "Delete",
+  "keys.tab": "Tab",
+  "keys.space": "Space",
+  "keys.pageUp": "Page Up",
+  "keys.pageDown": "Page Down",
+  "keys.home": "Home",
+  "keys.end": "End",
+  "keys.insert": "Insert"
 }
