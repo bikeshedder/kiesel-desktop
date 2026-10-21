@@ -1,17 +1,26 @@
 //! `Button` – the default variant, size md, with `loading` (see `kiesel/src/components/Button`).
+//!
+//! Activation follows the browser's `<button>`: a pointer press and release on
+//! it, Space (on release, pressed look while held), Enter (on press), or the
+//! assistive technology's click. Focus from the keyboard shows the focus ring
+//! (`:focus-visible`), focus from a pointer press doesn't.
 
 use std::time::Instant;
 
 use parley::Layout;
+use reactive_graph::signal::ArcRwSignal;
+use reactive_graph::traits::GetUntracked;
+use vello_cpu::RenderContext;
 use vello_cpu::kurbo::{Affine, Arc, Cap, Point, Rect, RoundedRect, Shape, Size, Stroke, Vec2};
 use vello_cpu::peniko::Gradient;
-use vello_cpu::{RenderContext, Resources};
 use winit::cursor::CursorIcon;
+use winit::keyboard::{Key, NamedKey};
 
 use crate::anim::Transition;
 use crate::paint::{self, TOLERANCE};
-use crate::text::{self, Text, TextStyle};
-use crate::theme::{Theme, mix};
+use crate::text::{self, TextStyle};
+use crate::theme::{Color, Theme, mix};
+use crate::widget::{Event, EventCx, LayoutCx, PaintCx, Widget, WidgetId, accessible_rect};
 
 /// The spinner box is 1.25em (the icon's place), the spinner itself 1.05em
 const SPINNER_BOX_EM: f64 = 1.25;
@@ -20,50 +29,107 @@ const SPINNER_EM: f64 = 1.05;
 const SPIN_PERIOD: f64 = 0.9;
 
 pub struct Button {
+    id: WidgetId,
     label: String,
     layout: Option<Layout<()>>,
     bounds: Rect,
-    loading: bool,
+    radius: f64,
+    loading: ArcRwSignal<bool>,
+    /// `loading` as of the last layout – what is on screen
+    shown_loading: bool,
     spin_start: Instant,
+    on_click: Option<Box<dyn FnMut()>>,
     hovered: bool,
     /// Pointer went down on the button and hasn't been released yet
-    armed: bool,
+    pointer_armed: bool,
+    /// Space is held while focused
+    key_armed: bool,
+    focused: bool,
+    focus_visible: bool,
     hover: Transition,
     press: Transition,
+    ring: Transition,
 }
 
 impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
+            id: WidgetId::next(),
             label: label.into(),
             layout: None,
             bounds: Rect::ZERO,
-            loading: false,
+            radius: 0.0,
+            loading: ArcRwSignal::new(false),
+            shown_loading: false,
             spin_start: Instant::now(),
+            on_click: None,
             hovered: false,
-            armed: false,
+            pointer_armed: false,
+            key_armed: false,
+            focused: false,
+            focus_visible: false,
             hover: Transition::new(0.0),
             press: Transition::new(0.0),
+            ring: Transition::new(0.0),
         }
     }
 
-    pub fn loading(&self) -> bool {
-        self.loading
-    }
-
-    pub fn set_loading(&mut self, loading: bool, now: Instant, theme: &Theme) {
-        if loading && !self.loading {
-            self.spin_start = now;
-        }
+    /// Busy: a spinner before the label; the label stays
+    pub fn loading(mut self, loading: ArcRwSignal<bool>) -> Self {
         self.loading = loading;
-        self.sync(now, theme);
+        self
     }
 
-    /// Natural size: inline padding + [spinner + gap] + label; at least `--ksl-control` high
-    pub fn measure(&mut self, text: &mut Text, theme: &Theme) -> Size {
-        let m = &theme.metrics;
+    pub fn on_click(mut self, f: impl FnMut() + 'static) -> Self {
+        self.on_click = Some(Box::new(f));
+        self
+    }
+
+    fn activate(&mut self) {
+        if let Some(f) = &mut self.on_click {
+            f();
+        }
+    }
+
+    fn hit_point(&self, p: Point) -> bool {
+        RoundedRect::from_rect(self.bounds, self.radius).contains(p)
+    }
+
+    /// Moves the transitions towards the current state. While loading the
+    /// button is busy, not interactive-looking: no hover or press visuals.
+    fn sync(&mut self, now: Instant, theme: &Theme) {
+        let d = theme.metrics.duration;
+        let live = !self.shown_loading;
+        let pressed = (self.hovered && self.pointer_armed) || self.key_armed;
+        self.hover
+            .set(f64::from(u8::from(live && self.hovered)), now, d);
+        self.press.set(f64::from(u8::from(live && pressed)), now, d);
+        self.ring.set(
+            f64::from(u8::from(self.focused && self.focus_visible)),
+            now,
+            d,
+        );
+    }
+}
+
+impl Widget for Button {
+    fn id(&self) -> WidgetId {
+        self.id
+    }
+
+    /// Inline padding + [spinner + gap] + label; at least `--ksl-control` high
+    fn measure(&mut self, cx: &mut LayoutCx<'_>) -> Size {
+        let loading = self.loading.get_untracked();
+        if loading != self.shown_loading {
+            if loading {
+                self.spin_start = cx.now;
+            }
+            self.shown_loading = loading;
+            self.sync(cx.now, cx.theme);
+        }
+        let m = &cx.theme.metrics;
         let layout = self.layout.get_or_insert_with(|| {
-            text.line(
+            cx.text.line(
                 &self.label,
                 &TextStyle {
                     family: m.font_family,
@@ -74,7 +140,7 @@ impl Button {
             )
         });
         let mut content = f64::from(layout.width());
-        if self.loading {
+        if self.shown_loading {
             content += SPINNER_BOX_EM * f64::from(m.font_size) + m.gap;
         }
         Size::new(
@@ -83,71 +149,103 @@ impl Button {
         )
     }
 
-    pub fn set_bounds(&mut self, bounds: Rect) {
+    fn place(&mut self, cx: &mut LayoutCx<'_>, bounds: Rect) {
         self.bounds = bounds;
+        self.radius = cx.theme.metrics.radius;
     }
 
-    pub fn bounds(&self) -> Rect {
+    fn bounds(&self) -> Rect {
         self.bounds
     }
 
-    fn hit(&self, p: Point, theme: &Theme) -> bool {
-        RoundedRect::from_rect(self.bounds, theme.metrics.radius).contains(p)
+    fn hit(&self, p: Point) -> bool {
+        self.hit_point(p)
     }
 
-    /// While loading the button is busy, not interactive-looking: no hover or press visuals
-    fn sync(&mut self, now: Instant, theme: &Theme) {
-        let d = theme.metrics.duration;
-        let live = !self.loading;
-        self.hover
-            .set(f64::from(u8::from(live && self.hovered)), now, d);
-        self.press.set(
-            f64::from(u8::from(live && self.hovered && self.armed)),
-            now,
-            d,
-        );
+    fn focusable(&self) -> bool {
+        true
     }
 
-    pub fn pointer_move(&mut self, p: Option<Point>, now: Instant, theme: &Theme) {
-        self.hovered = p.is_some_and(|p| self.hit(p, theme));
-        self.sync(now, theme);
+    fn event(&mut self, cx: &mut EventCx<'_>, event: &Event) {
+        match event {
+            Event::PointerEnter => self.hovered = true,
+            Event::PointerLeave => self.hovered = false,
+            Event::PointerMove(p) => self.hovered = self.hit_point(*p),
+            Event::PointerDown(p) => self.pointer_armed = self.hit_point(*p),
+            Event::PointerUp(p) => {
+                let click = self.pointer_armed && self.hit_point(*p);
+                self.pointer_armed = false;
+                if click {
+                    self.activate();
+                }
+            }
+            Event::KeyDown { key, repeat: false } if is_space(key) => self.key_armed = true,
+            Event::KeyUp { key } if is_space(key) && self.key_armed => {
+                self.key_armed = false;
+                self.activate();
+            }
+            Event::KeyDown {
+                key: Key::Named(NamedKey::Enter),
+                repeat: false,
+            } => self.activate(),
+            Event::Focus { focused, visible } => {
+                self.focused = *focused;
+                self.focus_visible = *visible;
+                if !focused {
+                    self.key_armed = false;
+                }
+            }
+            Event::Activate => self.activate(),
+            _ => {}
+        }
+        self.sync(cx.now, cx.theme);
     }
 
-    pub fn pointer_down(&mut self, p: Point, now: Instant, theme: &Theme) {
-        self.hovered = self.hit(p, theme);
-        self.armed = self.hovered;
-        self.sync(now, theme);
-    }
-
-    /// True when this completes a click (down and up on the button)
-    pub fn pointer_up(&mut self, p: Point, now: Instant, theme: &Theme) -> bool {
-        self.hovered = self.hit(p, theme);
-        let clicked = self.armed && self.hovered;
-        self.armed = false;
-        self.sync(now, theme);
-        clicked
-    }
-
-    pub fn cursor(&self) -> CursorIcon {
-        match (self.hovered, self.loading) {
+    fn cursor(&self) -> CursorIcon {
+        match (self.hovered, self.shown_loading) {
             (true, true) => CursorIcon::Progress,
             (true, false) => CursorIcon::Pointer,
             _ => CursorIcon::Default,
         }
     }
 
-    pub fn animating(&self, now: Instant, theme: &Theme) -> bool {
+    fn animating(&self, now: Instant, theme: &Theme) -> bool {
         let d = theme.metrics.duration;
-        self.loading || self.hover.animating(now, d) || self.press.animating(now, d)
+        self.shown_loading
+            || self.hover.animating(now, d)
+            || self.press.animating(now, d)
+            || self.ring.animating(now, d)
     }
 
-    pub fn paint(&self, ctx: &mut RenderContext, res: &mut Resources, theme: &Theme, now: Instant) {
+    fn accessibility(&self) -> Option<accesskit::Node> {
+        let mut node = accesskit::Node::new(accesskit::Role::Button);
+        node.set_label(self.label.clone());
+        node.set_bounds(accessible_rect(self.bounds));
+        node.add_action(accesskit::Action::Click);
+        node.add_action(accesskit::Action::Focus);
+        if self.shown_loading {
+            node.set_busy();
+        }
+        Some(node)
+    }
+
+    fn paint(&self, cx: &mut PaintCx<'_>) {
+        let (ctx, theme, now) = (&mut *cx.ctx, cx.theme, cx.now);
         let m = &theme.metrics;
         let (h, p) = (
             self.hover.value(now, m.duration),
             self.press.value(now, m.duration),
         );
         let (r, radius) = (self.bounds, m.radius);
+
+        // focus ring: the last (lowest) of the button's box shadows
+        paint::outer_shadows(
+            ctx,
+            r,
+            radius,
+            &[theme.focus_ring],
+            self.ring.value(now, m.duration) as f32,
+        );
 
         // shadows: rest ↔ hover move with the hover transition, the pressed
         // (inset) set fades in as the raised one fades out
@@ -168,7 +266,7 @@ impl Button {
         // content: [spinner][gap]label, centred; pressed it sinks a little
         let Some(layout) = &self.layout else { return };
         let em = f64::from(m.font_size);
-        let spinner_w = if self.loading {
+        let spinner_w = if self.shown_loading {
             SPINNER_BOX_EM * em + m.gap
         } else {
             0.0
@@ -186,7 +284,7 @@ impl Button {
         ctx.set_transform(base * sink);
 
         let fg = mix(theme.text_1, theme.accent_2, down);
-        if self.loading {
+        if self.shown_loading {
             let box_size = SPINNER_BOX_EM * em;
             let c = Point::new(origin.x + box_size / 2.0, centre.y);
             let turn = (now.duration_since(self.spin_start).as_secs_f64() / SPIN_PERIOD).fract();
@@ -194,7 +292,7 @@ impl Button {
         }
         text::draw(
             ctx,
-            res,
+            cx.res,
             layout,
             Point::new(origin.x + spinner_w, origin.y),
             fg,
@@ -203,15 +301,14 @@ impl Button {
     }
 }
 
+/// winit reports Space as the character " ", not as a named key
+fn is_space(key: &Key) -> bool {
+    matches!(key, Key::Character(c) if c == " ")
+}
+
 /// Kiesel's Spinner: a 24-unit viewBox, circle r = 9, stroke 3; a faint track
 /// and an 18-unit arc with round caps, turning by `turn` (0..1)
-fn spinner(
-    ctx: &mut RenderContext,
-    centre: Point,
-    size: f64,
-    turn: f64,
-    color: crate::theme::Color,
-) {
+fn spinner(ctx: &mut RenderContext, centre: Point, size: f64, turn: f64, color: Color) {
     use std::f64::consts::TAU;
     let k = size / 24.0;
     let radius = 9.0 * k;

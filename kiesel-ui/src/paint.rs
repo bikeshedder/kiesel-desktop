@@ -36,7 +36,9 @@ pub fn outer_shadows(
             continue;
         };
         ctx.set_paint(color);
-        let r = rect + Vec2::new(s.x, s.y);
+        // spread grows the box and its corner radius
+        let r = (rect + Vec2::new(s.x, s.y)).inflate(s.spread, s.spread);
+        let radius = (radius + s.spread).max(0.0);
         if s.blur > 0.0 {
             // CSS blur radius = 2 σ
             ctx.fill_blurred_rounded_rect(&r, radius as f32, (s.blur / 2.0) as f32, false);
@@ -46,7 +48,8 @@ pub fn outer_shadows(
     }
 }
 
-/// The inset shadows of `shadows`, clipped to the box (paint them after the box)
+/// The inset shadows of `shadows`, clipped to the box (paint them after the box).
+/// Inset spread isn't supported yet – no Kiesel control uses it.
 pub fn inset_shadows(
     ctx: &mut RenderContext,
     rect: Rect,
@@ -99,6 +102,7 @@ pub fn lerp_shadows<const N: usize>(a: &[Shadow; N], b: &[Shadow; N], t: f64) ->
             x: a.x + (b.x - a.x) * t,
             y: a.y + (b.y - a.y) * t,
             blur: a.blur + (b.blur - a.blur) * t,
+            spread: a.spread + (b.spread - a.spread) * t,
             color: a.color.lerp_rect(b.color, tf),
         }
     })

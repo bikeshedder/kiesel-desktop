@@ -30,6 +30,7 @@ Goal: far less memory than a WebView. No browser, no JS, no Tauri.
 | Kiesel kitchensink in WebKitGTK ([tools/webkit-baseline.py](tools/webkit-baseline.py), software GL) | 604 MiB PSS (3 processes) |
 | Button demo, windowed, loading (spinner running), 640×400 @ 2× = 1280×800 px | 12.5 MiB PSS, 19.7 MiB RSS |
 | same at 1× | 9.2 MiB PSS, 13.4 MiB RSS |
+| Two-button demo with AccessKit active (AT-SPI listening), loading, 1280×800 px | 16.0 MiB PSS, 23.4 MiB RSS, 4 threads |
 
 Estimates (not measured yet, needs real hardware): GPU path with wgpu on Mesa ~50–90 MB, on NVIDIA ~120–200 MB.
 Full CPU redraws took ~55 ms in the unoptimised probe (120 blurred cards) → damage regions and cached shadows are required for dense screens.
@@ -45,22 +46,27 @@ kiesel-headless run cargo run --example button
 kiesel-headless shot out.png          # grim
 kiesel-headless move 640 400          # logical coordinates (tools/kiesel-input)
 kiesel-headless click 640 400         # also: down, up, scroll <dy>
-kiesel-headless key -k Return         # wtype (see open points)
+kiesel-headless key shift+Tab         # also: keydown, keyup, type <text> (us layout)
 kiesel-headless a11y                  # AT-SPI tree
+kiesel-headless a11y click "Save changes"   # also: focus <name>, where <name>
 kiesel-headless stop
 ```
 
-`tests/button-demo.sh` runs the button demo through hover, press, loading and back – light and dark, scale 1 and 2.
+`tests/button-demo.sh` drives the demo by pointer, keyboard and assistive technology – light and dark, scale 1
+and 2 – and finds the buttons through the accessibility tree, not by coordinates.
 
-Open points: `wtype` (like `wlrctl`) creates its keyboard per call, so keys will likely race the same way the
-pointer did – extend `kiesel-input` with a virtual keyboard when keyboard handling lands. No IME and no portal
-(file dialogs) in the headless session yet.
+`wlrctl`/`wtype` create a device per call, which clients never get to bind; `tools/kiesel-input` keeps one virtual
+pointer and keyboard for the whole session. Open: no IME and no portal (file dialogs) in the headless session yet.
 
 ## Milestones
 
 1. ✅ **Button demo** (`cargo run --example button`) – a window, one Kiesel button centred horizontally and
    vertically, sharp at any output scale, light/dark from the system (`KIESEL_THEME` overrides); hover and press
    transitions as in CSS (180 ms, ease-3); a click toggles `loading` (spinner, progress cursor).
-2. Event routing, focus, keyboard activation, AccessKit node for the button.
+2. ✅ **Input, focus, accessibility** – a retained widget tree (`Widget`, `Row`); pointer routing with capture;
+   Tab / Shift+Tab focus chain with a `:focus-visible` ring (keyboard and AT focus show it, pointer focus doesn't
+   until a key is pressed); Button activation as in browsers (Space on release, Enter on press); AccessKit through
+   `accesskit_unix` directly (accesskit_winit pins winit 0.30) – Window and Button nodes with busy, focus, Click
+   and Focus actions. The demo's two buttons share a `reactive_graph` signal.
 3. Text and layout through parley + taffy; damage tracking.
 4. Port components following kiesel's ROADMAP order.

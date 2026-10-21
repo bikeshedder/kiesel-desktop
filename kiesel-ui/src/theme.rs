@@ -38,13 +38,14 @@ pub enum Scheme {
     Dark,
 }
 
-/// One box shadow, as in CSS: offset, blur radius, colour; `inset` draws inside the box
+/// One box shadow, as in CSS: offset, blur radius, spread, colour; `inset` draws inside the box
 #[derive(Clone, Copy, Debug)]
 pub struct Shadow {
     pub inset: bool,
     pub x: f64,
     pub y: f64,
     pub blur: f64,
+    pub spread: f64,
     pub color: Color,
 }
 
@@ -54,6 +55,7 @@ const fn outer(x: f64, y: f64, blur: f64, color: Color) -> Shadow {
         x,
         y,
         blur,
+        spread: 0.0,
         color,
     }
 }
@@ -63,6 +65,7 @@ const fn inset(x: f64, y: f64, blur: f64, color: Color) -> Shadow {
         x,
         y,
         blur,
+        spread: 0.0,
         color,
     }
 }
@@ -83,6 +86,8 @@ pub struct Theme {
     pub control_shadow: [Shadow; 4],
     pub control_shadow_hover: [Shadow; 4],
     pub control_shadow_pressed: [Shadow; 2],
+    /// `--ksl-focus-ring`: 0 0 0 3px, the accent at 45 %
+    pub focus_ring: Shadow,
     pub metrics: Metrics,
 }
 
@@ -196,6 +201,10 @@ impl Theme {
                 outer(-2.0, -2.0, 4.0, hi),
             ],
             control_shadow_pressed: [inset(2.0, 2.0, 4.0, lo_strong), inset(-1.0, -1.0, 2.0, hi)],
+            focus_ring: Shadow {
+                spread: 3.0,
+                ..outer(0.0, 0.0, 0.0, accent.multiply_alpha(0.45))
+            },
             metrics: Metrics {
                 control: 40.0 * f64::from(ap.density),
                 radius: 6.0 * f64::from(ap.roundness),
