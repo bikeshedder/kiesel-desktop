@@ -29,7 +29,7 @@ The stack, measured baselines and the headless test setup are in [PLAN.md](PLAN.
 | State | signals to the widgets that show them (any thread), timers (`wake_at`), `Show` and keyed `For` |
 | Accessibility | AccessKit on AT-SPI: roles, states, actions, text runs, caret and selection |
 | Theme | light/dark/system (XDG portal), saved per app, cross-fade, Lucide icons |
-| Widgets | Button (default, loading), Label, Card, TextField, Switch, IconToggle, ThemeSwitch, Scroll |
+| Widgets | Button (default, loading), Label, Card, TextField, Switch, IconToggle, ThemeSwitch, Scroll, Popover |
 
 ## D1 – Foundations (before many more widgets)
 
@@ -44,9 +44,13 @@ Without these, every widget after Field and Checkbox would be built twice.
   AT-SPI scrollTo revealing widgets, Kiesel's overlay scrollbar (thin while scrolling, wide under the pointer,
   draggable, fading out). Scroll frames only re-place (no measuring) and redraw the viewport; at 4K a momentum
   frame takes ~8 ms. Example: `list`.
-- [ ] **M** **Popups.** Second surfaces anchored to a widget – winit's popups (xdg_popup on Wayland: they may leave
-  the window, the compositor flips and slides them). The shell gets more than one surface: input, focus and
-  Escape per popup, dismissal on outside click. Menus, Select, Combobox, Tooltip and DateField sit on this.
+- [x] **M** **Popups.** An in-window layer above the content, as on Kiesel Web – decided over real popup
+  surfaces because softbuffer's Wayland buffers have no alpha (no rounded corners, no shadows). Panels lay
+  themselves out at their natural size and are placed next to their anchor: flipped, slid along the edge, below
+  when neither side fits; Kiesel's float shadow, optional arrow, the "shift" animation. A click outside or Escape
+  dismisses the topmost; a press on the owner only closes it; opened from the keyboard, focus moves in and Tab
+  stays inside; focus returns on close. `Popover` is the first user. Real popup surfaces (which may leave the
+  window) can follow with the GPU renderer, whose surfaces have alpha. Example: `popover`.
 - [ ] **S** **Messages.** English and German catalogs like Kiesel Web's (the widgets' own strings: "Light",
   "Dark", "Theme", "Loading"); the language from the system; number and date formatting through ICU4X (already
   in the tree through parley).

@@ -48,6 +48,7 @@ use crate::a11y::Accessibility;
 use crate::anim::EASE;
 use crate::clipboard::Clipboard;
 use crate::layout::Layout;
+use crate::popup::{Command, PopupQueue, Root};
 use crate::reactive::Watch;
 use crate::reactive::{Inbox, MountCx};
 use crate::text::Text;
@@ -102,7 +103,7 @@ pub fn run(
     let event_loop = EventLoop::new()?;
     let proxy = event_loop.create_proxy();
     let inbox = Inbox::new(move || proxy.wake_up());
-    let mut root: Box<dyn Widget> = Box::new(root);
+    let mut root = Root::new(Box::new(root));
     widget::mount_all(root.as_mut(), &mut MountCx { inbox: &inbox });
     // the shell watches the scheme like a widget watches its signals
     let scheme = options.theming.scheme();
@@ -116,6 +117,7 @@ pub fn run(
         _scheme_watch: scheme_watch,
         options,
         root,
+        popups: PopupQueue::default(),
         inbox,
         touched: Vec::new(),
         update_everything: true,
@@ -162,7 +164,9 @@ struct Shell {
     /// The cross-fade to a new scheme, while it runs
     fade: Option<Fade>,
     _scheme_watch: Watch,
-    root: Box<dyn Widget>,
+    /// The app's content and the open popup layers
+    root: Root,
+    popups: PopupQueue,
     inbox: Arc<Inbox>,
     /// Widgets that got events since the last update
     touched: Vec<WidgetId>,
@@ -313,6 +317,7 @@ impl Shell {
             text: &mut self.text,
             now: Instant::now(),
             inbox: &self.inbox,
+            popups: &self.popups,
         };
         if std::mem::take(&mut self.update_everything) {
             widget::update_all(self.root.as_mut(), &mut cx, &mut relayout, &mut repaint);
@@ -347,8 +352,16 @@ impl Shell {
                 text: &mut shell.text,
                 now: Instant::now(),
                 inbox: &shell.inbox,
+                popups: &shell.popups,
             };
-            shell.layout.run(shell.root.as_mut(), &mut cx, size, dirty);
+            shell
+                .layout
+                .run(shell.root.content_mut(), &mut cx, size, dirty);
+            let window = Rect::from_origin_size(Point::ZERO, size);
+            shell.root.set_bounds(&mut cx, window);
+            for layer in shell.root.layers_mut() {
+                layer.lay_out(&mut cx, window, dirty);
+            }
         });
         self.needs_layout = false;
         self.needs_place = false;
@@ -362,8 +375,14 @@ impl Shell {
                 text: &mut shell.text,
                 now: Instant::now(),
                 inbox: &shell.inbox,
+                popups: &shell.popups,
             };
-            shell.layout.place(shell.root.as_mut(), &mut cx);
+            shell.layout.place(shell.root.content_mut(), &mut cx);
+            // a layer is small: lay it out again (something in it may have scrolled)
+            let window = shell.root.bounds();
+            for layer in shell.root.layers_mut() {
+                layer.lay_out(&mut cx, window, &[]);
+            }
         });
         self.needs_place = false;
     }
@@ -397,11 +416,23 @@ impl Shell {
         let order_before = self
             .focused
             .map(|_| widget::focus_order(self.root.as_ref()));
-        let dirty = self.collect_updates();
+        let mut dirty = self.collect_updates();
+        let focus_into = self.apply_popups();
+        if focus_into.is_some() {
+            dirty.push(self.root.id());
+        }
         if self.needs_layout || !dirty.is_empty() {
             self.relayout(&dirty);
         } else if self.needs_place {
             self.reposition();
+        }
+        if let Some(layer) = focus_into {
+            // opened from the keyboard: focus moves into it
+            let first = widget::find(self.root.as_ref(), layer)
+                .and_then(|l| widget::focus_order(l).first().copied());
+            if let Some(first) = first {
+                self.set_focus(Some(first), true);
+            }
         }
         self.forget_removed(order_before);
         if let Some(p) = self.pointer {
@@ -424,6 +455,69 @@ impl Shell {
         if self.damage.is_some() || self.full_damage {
             self.request_redraw();
         }
+    }
+
+    /// Opens and closes the popups widgets asked for in this update; returns a
+    /// layer opened from the keyboard (focus moves into it after layout)
+    fn apply_popups(&mut self) -> Option<WidgetId> {
+        let now = Instant::now();
+        let mut focus_into = None;
+        for command in self.popups.take() {
+            match command {
+                Command::Open(mut layer) => {
+                    layer.restore_focus = self.focused;
+                    layer.opened_at(now);
+                    if self.focus_visible && self.focused == Some(layer.owner) {
+                        focus_into = Some(layer.id());
+                    }
+                    self.root.push_layer(layer);
+                    self.needs_layout = true;
+                }
+                Command::Close(id) => self.close_layer(id, false),
+            }
+        }
+        focus_into
+    }
+
+    /// Closes a layer – `dismissed`: by the user (its owner hears of it). Focus
+    /// inside it goes back to where it was before it opened.
+    fn close_layer(&mut self, id: WidgetId, dismissed: bool) {
+        let now = Instant::now();
+        let Some(layer) = self.root.layer_mut(id) else {
+            return;
+        };
+        if layer.is_closing() {
+            return;
+        }
+        if dismissed {
+            layer.dismiss(now);
+        } else {
+            layer.close(now);
+        }
+        let back = layer.restore_focus.or(Some(layer.owner));
+        let ink = layer.ink();
+        self.add_damage(ink);
+        self.request_redraw();
+        let focus_inside = self
+            .focused
+            .and_then(|f| widget::path(self.root.as_ref(), f))
+            .is_some_and(|p| p.contains(&id));
+        if focus_inside {
+            let visible = self.focus_visible;
+            self.focused = None;
+            self.set_focus(back, visible);
+        }
+    }
+
+    /// The topmost open layer that contains `id`, if any
+    fn layer_of(&self, id: WidgetId) -> Option<WidgetId> {
+        let path = widget::path(self.root.as_ref(), id)?;
+        self.root
+            .layers()
+            .filter(|l| !l.is_closing())
+            .map(|l| l.id())
+            .filter(|l| path.contains(l))
+            .last()
     }
 
     /// Widgets removed by an update can't stay focused, hovered or captured. Focus
@@ -529,7 +623,12 @@ impl Shell {
 
     /// Tab order, wrapping around
     fn move_focus(&mut self, backwards: bool) {
-        let order = widget::focus_order(self.root.as_ref());
+        // inside a popup, Tab goes round the popup
+        let scope = self.focused.and_then(|f| self.layer_of(f));
+        let order = match scope.and_then(|l| widget::find(self.root.as_ref(), l)) {
+            Some(layer) => widget::focus_order(layer),
+            None => widget::focus_order(self.root.as_ref()),
+        };
         if order.is_empty() {
             return;
         }
@@ -581,6 +680,21 @@ impl Shell {
     }
 
     fn pointer_down(&mut self, p: Point) {
+        // a press outside the topmost popup closes it; one on its owner only closes
+        // it (the owner would open it again)
+        if let Some((top, owner)) = self.root.top_layer().map(|l| (l.id(), l.owner)) {
+            let target = widget::hit_test(self.root.as_ref(), p);
+            let path = target
+                .and_then(|t| widget::path(self.root.as_ref(), t))
+                .unwrap_or_default();
+            if !path.contains(&top) {
+                self.close_layer(top, true);
+                if path.contains(&owner) {
+                    self.changed();
+                    return;
+                }
+            }
+        }
         let now = Instant::now();
         let repeat = self.last_press.is_some_and(|(t, at)| {
             now.duration_since(t) <= MULTI_CLICK_TIME && at.distance(p) <= MULTI_CLICK_DISTANCE
@@ -612,6 +726,15 @@ impl Shell {
 
     fn key(&mut self, event: KeyEvent) {
         let down = event.state == ElementState::Pressed;
+        if down
+            && matches!(event.logical_key, Key::Named(NamedKey::Escape))
+            && let Some(top) = self.root.top_layer().map(|l| l.id())
+        {
+            // Escape closes the innermost popup, wherever focus is
+            self.close_layer(top, true);
+            self.changed();
+            return;
+        }
         if down && matches!(event.logical_key, Key::Named(NamedKey::Tab)) {
             self.move_focus(self.modifiers.shift_key());
             if let Some(f) = self.focused {
@@ -801,6 +924,14 @@ impl Shell {
         }
         // animating widgets need their ink redrawn – and those that animated
         // last frame once more, so a transition that just ended shows its end
+        let gone = self.root.remove_gone(now);
+        if !gone.is_empty() {
+            for ink in gone {
+                self.add_damage(ink);
+            }
+            // a closed popup leaves the accessibility tree too
+            self.update_accessibility();
+        }
         let mut moving = Vec::new();
         widget::animating(self.root.as_ref(), now, &self.theme, None, &mut moving);
         // animations that move children (scrolling, momentum) report it from

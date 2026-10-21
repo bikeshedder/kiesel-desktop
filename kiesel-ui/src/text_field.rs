@@ -715,11 +715,13 @@ mod tests {
 
         fn update(&mut self) {
             let inbox = crate::reactive::Inbox::new(|| {});
+            let popups = crate::popup::PopupQueue::default();
             let mut cx = LayoutCx {
                 theme: &self.theme,
                 text: &mut self.text,
                 now: Instant::now(),
                 inbox: &inbox,
+                popups: &popups,
             };
             self.field.update(&mut cx);
         }

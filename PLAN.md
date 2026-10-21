@@ -74,6 +74,7 @@ and 2 – and finds the buttons through the accessibility tree, not by coordinat
 wrapping on resize, that animation frames redraw only a small region, and that partial redraws match full ones
 (`KIESEL_FULL_REDRAW=1`) within ±2 per channel – the same pixel can round one step apart at another origin.
 
+`tests/popover-demo.sh` opens, places and dismisses popovers and follows focus in and out;
 `tests/list-demo.sh` scrolls by wheel, touchpad (momentum), keys and scrollbar, and checks AT-SPI scrollTo;
 `tests/todo-demo.sh` adds and removes widgets at runtime and watches memory.
 `tests/theme-demo.sh` follows a (fake) system preference, chooses, saves and restores the theme.

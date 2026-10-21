@@ -110,6 +110,10 @@ pub struct Theme {
     pub rim: Color,
     /// `--ksl-knob`: the 145° gradient of round knobs (0 %, 55 %, 100 %)
     pub knob: [Color; 3],
+    /// `--ksl-surface-raised`: popovers and dialogs
+    pub surface_raised: Color,
+    /// `--ksl-float`: what floats above the page (popovers, dialogs)
+    pub float: [Shadow; 3],
     pub metrics: Metrics,
 }
 
@@ -187,6 +191,8 @@ impl Theme {
             icon,
             rim,
             knob,
+            lo,
+            raised,
         ) = match scheme {
             Scheme::Light => (
                 n(0.949, 0.0058),
@@ -215,6 +221,8 @@ impl Theme {
                     n(0.955, 0.0058),
                     n(0.924, 0.0087),
                 ],
+                na(0.739, 0.0285, 0.55),
+                n(0.961, 0.0041),
             ),
             Scheme::Dark => (
                 n(0.275, 0.0240),
@@ -239,6 +247,8 @@ impl Theme {
                 n(0.660, 0.0260),
                 white(0.05),
                 [n(0.695, 0.0298), n(0.646, 0.0304), n(0.600, 0.0324)],
+                na(0.120, 0.0150, 0.55),
+                n(0.300, 0.0260),
             ),
         };
 
@@ -292,6 +302,15 @@ impl Theme {
             lo_strong,
             rim,
             knob,
+            surface_raised: raised,
+            float: [
+                Shadow {
+                    spread: -16.0,
+                    ..outer(0.0, 24.0, 48.0, lo_strong)
+                },
+                outer(-8.0, -8.0, 24.0, hi),
+                outer(8.0, 8.0, 24.0, lo),
+            ],
             metrics: Metrics {
                 control: 40.0 * f64::from(ap.density),
                 radius: 6.0 * f64::from(ap.roundness),
@@ -350,6 +369,8 @@ impl Theme {
                 c(a.knob[1], b.knob[1]),
                 c(a.knob[2], b.knob[2]),
             ],
+            surface_raised: c(a.surface_raised, b.surface_raised),
+            float: sh(&a.float, &b.float, t64),
             metrics: b.metrics,
         }
     }

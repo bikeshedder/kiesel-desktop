@@ -16,6 +16,17 @@ use vello_cpu::kurbo::{Point, Rect, Size};
 
 use crate::widget::{self, LayoutCx, Widget, WidgetId};
 
+/// How the root is sized
+#[derive(Clone, Copy)]
+enum Fit {
+    /// It fills the window
+    Fill(Size),
+    /// As wide and high as its content
+    Natural,
+    /// This wide, as high as its content
+    Width(f32),
+}
+
 pub(crate) struct Layout {
     tree: TaffyTree<WidgetId>,
     nodes: HashMap<WidgetId, NodeId>,
@@ -39,8 +50,42 @@ impl Layout {
         size: Size,
         dirty: &[WidgetId],
     ) {
+        self.compute(root, cx, Fit::Fill(size), dirty);
+        self.apply(root, cx, Point::ZERO);
+    }
+
+    /// Lays out `root` at its natural size (as wide and high as its content, within
+    /// its own size limits) without placing it; see [`Layout::place_at`]
+    pub fn fit(
+        &mut self,
+        root: &mut dyn Widget,
+        cx: &mut LayoutCx<'_>,
+        dirty: &[WidgetId],
+    ) -> Size {
+        let node = self.compute(root, cx, Fit::Natural, dirty);
+        let l = self.tree.layout(node).expect("laid out");
+        let width = l.size.width;
+        // Text wraps only once the width is known: lay out again at that width,
+        // or a paragraph that wraps keeps the height of one line
+        let node = self.compute(root, cx, Fit::Width(width), &[]);
+        let l = self.tree.layout(node).expect("laid out");
+        Size::new(f64::from(l.size.width), f64::from(l.size.height))
+    }
+
+    /// Places `root` (laid out by [`Layout::fit`]) with its top-left corner at `origin`
+    pub fn place_at(&self, root: &mut dyn Widget, cx: &mut LayoutCx<'_>, origin: Point) {
+        self.apply(root, cx, origin);
+    }
+
+    fn compute(
+        &mut self,
+        root: &mut dyn Widget,
+        cx: &mut LayoutCx<'_>,
+        fit: Fit,
+        dirty: &[WidgetId],
+    ) -> NodeId {
         let mut seen = HashSet::new();
-        let root_node = self.sync_node(root, cx, &mut seen, true);
+        let root_node = self.sync_node(root, cx, &mut seen, matches!(fit, Fit::Fill(_)));
         for id in dirty {
             if let Some(&node) = self.nodes.get(id) {
                 self.tree.mark_dirty(node).expect("node exists");
@@ -55,9 +100,19 @@ impl Layout {
             keep
         });
 
-        let available = taffy::Size {
-            width: AvailableSpace::Definite(size.width as f32),
-            height: AvailableSpace::Definite(size.height as f32),
+        let available = match fit {
+            Fit::Fill(size) => taffy::Size {
+                width: AvailableSpace::Definite(size.width as f32),
+                height: AvailableSpace::Definite(size.height as f32),
+            },
+            Fit::Natural => taffy::Size {
+                width: AvailableSpace::MaxContent,
+                height: AvailableSpace::MaxContent,
+            },
+            Fit::Width(w) => taffy::Size {
+                width: AvailableSpace::Definite(w),
+                height: AvailableSpace::MaxContent,
+            },
         };
         self.tree
             .compute_layout_with_measure(root_node, available, |input, _, id, style| {
@@ -81,7 +136,7 @@ impl Layout {
                 )
             })
             .expect("layout");
-        self.apply(root, cx, Point::ZERO);
+        root_node
     }
 
     /// The nodes `w` puts into its parent: its own, or its children's if it is transparent
@@ -91,6 +146,10 @@ impl Layout {
         cx: &LayoutCx<'_>,
         seen: &mut HashSet<WidgetId>,
     ) -> Vec<NodeId> {
+        if w.detached() {
+            // popup layers lay themselves out
+            return Vec::new();
+        }
         if w.layout_transparent() {
             return w
                 .children()

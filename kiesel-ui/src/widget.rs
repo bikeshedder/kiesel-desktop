@@ -105,9 +105,21 @@ pub struct LayoutCx<'a> {
     pub text: &'a mut Text,
     pub now: Instant,
     pub(crate) inbox: &'a std::sync::Arc<crate::reactive::Inbox>,
+    pub(crate) popups: &'a crate::popup::PopupQueue,
 }
 
 impl LayoutCx<'_> {
+    /// Opens a popup above the window's content; it is mounted here. Returns its id,
+    /// for [`LayoutCx::close_popup`].
+    pub fn open_popup(&mut self, mut popup: crate::popup::Popup) -> WidgetId {
+        self.mount(popup.content.as_mut());
+        self.popups.open(popup)
+    }
+
+    pub fn close_popup(&mut self, id: WidgetId) {
+        self.popups.close(id);
+    }
+
     /// Brings a widget created at runtime (and its children) to life: watches
     /// its signals and lets it read their values – call it before adding the
     /// widget to the tree
@@ -206,7 +218,22 @@ impl std::ops::BitOrAssign for Change {
 pub type Known = taffy::Size<Option<f32>>;
 pub type Available = taffy::Size<taffy::AvailableSpace>;
 
-pub trait Widget {
+/// For widgets that hold widgets of a known kind (the shell's popup layers)
+pub trait AsAny {
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+
+impl<T: 'static> AsAny for T {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
+pub trait Widget: AsAny {
     fn id(&self) -> WidgetId;
 
     fn children(&self) -> &[Box<dyn Widget>] {
@@ -215,6 +242,11 @@ pub trait Widget {
 
     fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
         &mut []
+    }
+
+    /// Laid out on its own, not as part of its parent (popup layers)
+    fn detached(&self) -> bool {
+        false
     }
 
     /// Takes no box of its own in layout: its children are laid out as its
@@ -531,11 +563,13 @@ pub(crate) mod tests {
         let theme = Theme::new(Scheme::Light, &Appearance::default());
         let mut text = Text::default();
         let inbox = crate::reactive::Inbox::new(|| {});
+        let popups = crate::popup::PopupQueue::default();
         let mut cx = LayoutCx {
             theme: &theme,
             text: &mut text,
             now: Instant::now(),
             inbox: &inbox,
+            popups: &popups,
         };
         let (mut relayout, mut repaint) = (Vec::new(), Vec::new());
         update_all(root, &mut cx, &mut relayout, &mut repaint);
