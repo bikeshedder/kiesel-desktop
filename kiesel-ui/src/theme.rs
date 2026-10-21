@@ -9,7 +9,7 @@ use vello_cpu::peniko::color::{AlphaColor, Oklch, Srgb};
 pub type Color = AlphaColor<Srgb>;
 
 /// The appearance parameters on `:root` (`--ksl-accent-color`, `--ksl-roundness`, …)
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Appearance {
     pub accent_color: Color,
     pub roundness: f32,
@@ -17,6 +17,12 @@ pub struct Appearance {
     pub depth: f32,
     pub neutral_hue: f32,
     pub tint: f32,
+    /// `--ksl-contrast`: 0 low, 1 medium, 2 high – values in between blend
+    pub contrast: f32,
+    /// Text sizes × this (the desktop's large-text setting)
+    pub text_scale: f32,
+    /// Transitions and animations take no time (the desktop's reduced motion)
+    pub reduce_motion: bool,
 }
 
 impl Default for Appearance {
@@ -28,6 +34,9 @@ impl Default for Appearance {
             depth: 1.0,
             neutral_hue: 260.0,
             tint: 0.45,
+            contrast: 1.0,
+            text_scale: 1.0,
+            reduce_motion: false,
         }
     }
 }
@@ -114,6 +123,8 @@ pub struct Theme {
     pub surface_raised: Color,
     /// `--ksl-float`: what floats above the page (popovers, dialogs)
     pub float: [Shadow; 3],
+    /// The desktop asks for fewer animations: see [`Theme::motion`]
+    pub reduce_motion: bool,
     pub metrics: Metrics,
 }
 
@@ -165,6 +176,11 @@ impl Theme {
         let (hue, t, d) = (ap.neutral_hue, ap.tint, ap.depth);
         let n = |l: f32, c: f32| oklch(l, c * t, hue, 1.0);
         let na = |l: f32, c: f32, a: f32| oklch(l, c * t, hue, a * d);
+        // --ksl-c-low/mid/high: the contrast's weights between Kiesel's three levels
+        let k = ap.contrast.clamp(0.0, 2.0);
+        let (cl, ch) = ((1.0 - k).max(0.0), (k - 1.0).max(0.0));
+        let cm = 1.0 - cl - ch;
+        let c3 = |low: f32, mid: f32, high: f32| low * cl + mid * cm + high * ch;
         // the accent keeps hue and chroma of --ksl-accent-color, at each theme's lightness
         let [_, ac, ah, _] = ap.accent_color.convert::<Oklch>().components;
 
@@ -198,11 +214,11 @@ impl Theme {
                 n(0.949, 0.0058),
                 n(0.921, 0.0087),
                 n(0.970, 0.0041),
-                n(0.310, 0.0360),
-                n(0.470, 0.0350),
-                n(0.585, 0.0300),
-                oklch(0.57, ac.min(0.18), ah, 1.0),
-                oklch(0.50, (ac * 1.08).min(0.19), ah, 1.0),
+                n(c3(0.374, 0.310, 0.250), 0.0360),
+                n(c3(0.530, 0.470, 0.410), 0.0350),
+                n(c3(0.733, 0.585, 0.500), 0.0300),
+                oklch(c3(0.62, 0.57, 0.52), ac.min(0.18), ah, 1.0),
+                oklch(c3(0.54, 0.50, 0.46), (ac * 1.08).min(0.19), ah, 1.0),
                 white(0.95 * d),
                 na(0.599, 0.0360, 0.55),
                 na(0.701, 0.0363, 0.32),
@@ -212,9 +228,9 @@ impl Theme {
                 Color::from_rgb8(0xff, 0xff, 0xff),
                 n(0.973, 0.0041),
                 n(0.930, 0.0087),
-                oklch(0.374, 0.0353 * t, hue, 0.24),
+                oklch(0.374, 0.0353 * t, hue, c3(0.16, 0.24, 0.32)),
                 oklch(0.374, 0.0353 * t, hue, 0.10),
-                n(0.600, 0.0280),
+                n(c3(0.783, 0.600, 0.500), 0.0280),
                 white(0.7),
                 [
                     Color::from_rgb8(0xff, 0xff, 0xff),
@@ -224,32 +240,39 @@ impl Theme {
                 na(0.739, 0.0285, 0.55),
                 n(0.961, 0.0041),
             ),
-            Scheme::Dark => (
-                n(0.275, 0.0240),
-                n(0.230, 0.0200),
-                n(0.295, 0.0250),
-                n(0.920, 0.0120),
-                n(0.780, 0.0200),
-                n(0.640, 0.0260),
-                oklch(0.76, (ac * 0.85).min(0.15), ah, 1.0),
-                oklch(0.81, (ac * 0.77).min(0.14), ah, 1.0),
-                white(0.07 * d),
-                na(0.090, 0.0100, 0.7),
-                na(0.120, 0.0150, 0.38),
-                white(0.09),
-                n(0.360, 0.0300),
-                n(0.322, 0.0280),
-                n(0.385, 0.0320),
-                n(0.343, 0.0300),
-                n(0.240, 0.0210),
-                oklch(0.090, 0.0100 * t, hue, 0.55),
-                oklch(0.090, 0.0100 * t, hue, 0.35),
-                n(0.660, 0.0260),
-                white(0.05),
-                [n(0.695, 0.0298), n(0.646, 0.0304), n(0.600, 0.0324)],
-                na(0.120, 0.0150, 0.55),
-                n(0.300, 0.0260),
-            ),
+            Scheme::Dark => {
+                // in dark, the surfaces darken with contrast too
+                let lo_l = c3(0.177, 0.120, 0.070);
+                let lo_c = c3(0.0230, 0.0150, 0.0100);
+                let deep_l = c3(0.142, 0.090, 0.050);
+                let deep_c = c3(0.0155, 0.0100, 0.0060);
+                (
+                    n(c3(0.359, 0.275, 0.215), c3(0.0357, 0.0240, 0.0190)),
+                    n(c3(0.305, 0.230, 0.175), c3(0.0313, 0.0200, 0.0160)),
+                    n(c3(0.375, 0.295, 0.235), c3(0.0370, 0.0250, 0.0200)),
+                    n(c3(0.913, 0.920, 0.960), c3(0.0139, 0.0120, 0.0080)),
+                    n(c3(0.746, 0.780, 0.840), c3(0.0264, 0.0200, 0.0160)),
+                    n(c3(0.589, 0.640, 0.720), c3(0.0329, 0.0260, 0.0220)),
+                    oklch(0.76, (ac * 0.85).min(0.15), ah, 1.0),
+                    oklch(0.81, (ac * 0.77).min(0.14), ah, 1.0),
+                    white(0.07 * d),
+                    na(deep_l, deep_c, 0.7),
+                    na(lo_l, lo_c, 0.38),
+                    white(0.09),
+                    n(c3(0.427, 0.360, 0.300), c3(0.0409, 0.0300, 0.0250)),
+                    n(c3(0.387, 0.322, 0.265), c3(0.0384, 0.0280, 0.0230)),
+                    n(c3(0.450, 0.385, 0.325), c3(0.0420, 0.0320, 0.0270)),
+                    n(c3(0.406, 0.343, 0.285), c3(0.0395, 0.0300, 0.0250)),
+                    n(c3(0.313, 0.240, 0.185), c3(0.0328, 0.0210, 0.0170)),
+                    oklch(deep_l, deep_c * t, hue, 0.55),
+                    oklch(deep_l, deep_c * t, hue, 0.35),
+                    n(c3(0.609, 0.660, 0.740), c3(0.0326, 0.0260, 0.0220)),
+                    white(0.05),
+                    [n(0.695, 0.0298), n(0.646, 0.0304), n(0.600, 0.0324)],
+                    na(lo_l, lo_c, 0.55),
+                    n(c3(0.379, 0.300, 0.240), c3(0.0385, 0.0260, 0.0210)),
+                )
+            }
         };
 
         Self {
@@ -303,6 +326,7 @@ impl Theme {
             rim,
             knob,
             surface_raised: raised,
+            reduce_motion: ap.reduce_motion,
             float: [
                 Shadow {
                     spread: -16.0,
@@ -312,15 +336,16 @@ impl Theme {
                 outer(8.0, 8.0, 24.0, lo),
             ],
             metrics: Metrics {
-                control: 40.0 * f64::from(ap.density),
+                // larger text makes controls taller, as on GTK (Kiesel Web's are px)
+                control: 40.0 * f64::from(ap.density) * f64::from(ap.text_scale.max(1.0)),
                 radius: 6.0 * f64::from(ap.roundness),
                 radius_lg: 12.0 * f64::from(ap.roundness),
                 padding_x: 20.0,
                 gap: 8.0,
-                font_size: 16.0,
+                font_size: 16.0 * ap.text_scale,
                 font_weight: 600.0,
                 font_family: "Inter, system-ui, sans-serif",
-                duration: 0.180,
+                duration: if ap.reduce_motion { 0.0 } else { 0.180 },
             },
         }
     }
@@ -370,6 +395,7 @@ impl Theme {
                 c(a.knob[2], b.knob[2]),
             ],
             surface_raised: c(a.surface_raised, b.surface_raised),
+            reduce_motion: b.reduce_motion,
             float: sh(&a.float, &b.float, t64),
             metrics: b.metrics,
         }
@@ -419,6 +445,12 @@ pub struct TextStyle {
 }
 
 impl Theme {
+    /// How long an animation of `seconds` takes: no time with reduced motion
+    /// (like Kiesel Web's 1 ms transitions)
+    pub fn motion(&self, seconds: f64) -> f64 {
+        if self.reduce_motion { 0.0 } else { seconds }
+    }
+
     pub fn text_style(&self, role: TextRole) -> TextStyle {
         let family = self.metrics.font_family;
         let (size, weight, line_height) = match role {
@@ -426,9 +458,11 @@ impl Theme {
             TextRole::Title => (17.6, 600.0, 1.25),
             TextRole::Caption => (12.0, 400.0, 1.5),
         };
+        // the desktop's text scale (font_size is 16 × it)
+        let scale = self.metrics.font_size / 16.0;
         TextStyle {
             family,
-            size,
+            size: size * scale,
             weight,
             letter_spacing: 0.0,
             line_height,

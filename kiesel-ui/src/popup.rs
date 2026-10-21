@@ -116,6 +116,15 @@ const ARROW_INSET: f64 = 18.0;
 /// Opening: 180 ms ease-out-3; closing plays it backwards in 130 ms
 const OPEN: f64 = 0.18;
 const CLOSE: f64 = 0.13;
+
+/// How far `elapsed` is into an animation of `seconds` (0 … 1)
+fn progress(elapsed: std::time::Duration, seconds: f64) -> f64 {
+    if seconds <= 0.0 {
+        1.0
+    } else {
+        (elapsed.as_secs_f64() / seconds).min(1.0)
+    }
+}
 const EASE_OUT_3: CubicBezier = CubicBezier::new(0.0, 0.0, 0.3, 1.0);
 
 /// Where a panel of `size` goes next to `anchor` inside `window`: its top-left
@@ -216,6 +225,8 @@ pub(crate) struct Layer {
     arrow_at: f64,
     opened: Option<Instant>,
     closing: Option<Instant>,
+    /// Opens and closes without animations (reduced motion)
+    quick: bool,
 }
 
 impl Layer {
@@ -237,6 +248,7 @@ impl Layer {
             arrow_at: ARROW_INSET,
             opened: None,
             closing: None,
+            quick: false,
         }
     }
 
@@ -276,21 +288,30 @@ impl Layer {
     /// Closed, and done playing it
     pub fn is_gone(&self, now: Instant) -> bool {
         self.closing
-            .is_some_and(|c| now.duration_since(c).as_secs_f64() >= CLOSE)
+            .is_some_and(|c| now.duration_since(c).as_secs_f64() >= self.close_for())
     }
 
-    pub fn opened_at(&mut self, now: Instant) {
+    /// Shown from `now`; `quick`: without the animations (reduced motion)
+    pub fn opened_at(&mut self, now: Instant, quick: bool) {
         self.opened.get_or_insert(now);
+        self.quick = quick;
+    }
+
+    fn open_for(&self) -> f64 {
+        if self.quick { 0.0 } else { OPEN }
+    }
+
+    fn close_for(&self) -> f64 {
+        if self.quick { 0.0 } else { CLOSE }
     }
 
     /// How far it has appeared (0 … 1)
     fn shown(&self, now: Instant) -> f64 {
         if let Some(c) = self.closing {
-            let t = now.duration_since(c).as_secs_f64() / CLOSE;
-            return 1.0 - EASE.ease(t.min(1.0));
+            return 1.0 - EASE.ease(progress(now.duration_since(c), self.close_for()));
         }
         match self.opened {
-            Some(o) => EASE_OUT_3.ease((now.duration_since(o).as_secs_f64() / OPEN).min(1.0)),
+            Some(o) => EASE_OUT_3.ease(progress(now.duration_since(o), self.open_for())),
             None => 0.0,
         }
     }
@@ -402,8 +423,8 @@ impl Widget for Layer {
 
     fn animating(&self, now: Instant, _theme: &Theme) -> bool {
         match (self.opened, self.closing) {
-            (_, Some(c)) => now.duration_since(c).as_secs_f64() < CLOSE + 0.02,
-            (Some(o), None) => now.duration_since(o).as_secs_f64() < OPEN + 0.02,
+            (_, Some(c)) => now.duration_since(c).as_secs_f64() < self.close_for() + 0.02,
+            (Some(o), None) => now.duration_since(o).as_secs_f64() < self.open_for() + 0.02,
             (None, None) => true,
         }
     }

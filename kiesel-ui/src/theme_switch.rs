@@ -114,13 +114,14 @@ impl IconToggle {
         }
     }
 
-    fn sync(&mut self, now: Instant) {
+    fn sync(&mut self, now: Instant, theme: &Theme) {
         let on = |b: bool| f64::from(u8::from(b));
-        let mut changed = self.hover.set(on(self.hovered), now, COLOUR);
-        changed |= self.pressed_look.set(on(self.shown), now, COLOUR);
+        let d = theme.motion(COLOUR);
+        let mut changed = self.hover.set(on(self.hovered), now, d);
+        changed |= self.pressed_look.set(on(self.shown), now, d);
         changed |= self
             .ring
-            .set(on(self.focused && self.focus_visible), now, COLOUR);
+            .set(on(self.focused && self.focus_visible), now, d);
         self.repaint |= changed;
     }
 }
@@ -142,10 +143,10 @@ impl Widget for IconToggle {
         let pressed = self.pressed.get_untracked();
         if pressed != self.shown {
             self.shown = pressed;
-            if pressed {
+            if pressed && !cx.theme.reduce_motion {
                 self.arrived = Some(cx.now);
             }
-            self.sync(cx.now);
+            self.sync(cx.now, cx.theme);
         }
         self.repaint |= self.label.refresh();
         if std::mem::take(&mut self.repaint) {
@@ -193,10 +194,11 @@ impl Widget for IconToggle {
         CursorIcon::Pointer
     }
 
-    fn animating(&self, now: Instant, _theme: &Theme) -> bool {
-        self.hover.animating(now, COLOUR)
-            || self.pressed_look.animating(now, COLOUR)
-            || self.ring.animating(now, COLOUR)
+    fn animating(&self, now: Instant, theme: &Theme) -> bool {
+        let d = theme.motion(COLOUR);
+        self.hover.animating(now, d)
+            || self.pressed_look.animating(now, d)
+            || self.ring.animating(now, d)
             || self
                 .arrived
                 .is_some_and(|t| now.duration_since(t).as_secs_f64() < ARRIVE)
@@ -235,7 +237,7 @@ impl Widget for IconToggle {
             Event::Activate => self.activate(),
             _ => {}
         }
-        self.sync(cx.now);
+        self.sync(cx.now, cx.theme);
     }
 
     fn accessibility(&self) -> Option<accesskit::Node> {
@@ -254,22 +256,19 @@ impl Widget for IconToggle {
 
     fn paint(&self, cx: &mut PaintCx<'_>) {
         let (ctx, theme, now) = (&mut *cx.ctx, cx.theme, cx.now);
-        let ring = self.ring.value(now, COLOUR) as f32;
+        let d = theme.motion(COLOUR);
+        let ring = self.ring.value(now, d) as f32;
         if ring > 0.0 {
             ctx.set_stroke(Stroke::new(3.0));
             ctx.set_paint(theme.accent.multiply_alpha(0.45 * ring));
             ctx.stroke_path(&paint_circle(self.bounds.center(), self.px / 2.0 + 4.5));
         }
         // --ksl-icon; hover: --ksl-text-2; pressed: 60 % icon, 40 % text-1
-        let hovered = mix(
-            theme.icon,
-            theme.text_2,
-            self.hover.value(now, COLOUR) as f32,
-        );
+        let hovered = mix(theme.icon, theme.text_2, self.hover.value(now, d) as f32);
         let color = mix(
             hovered,
             mix(theme.icon, theme.text_1, 0.4),
-            self.pressed_look.value(now, COLOUR) as f32,
+            self.pressed_look.value(now, d) as f32,
         );
         let (from_deg, from_scale) = match self.arrival {
             Arrival::SpinIn => (-90.0, 0.8),

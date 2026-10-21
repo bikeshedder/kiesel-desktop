@@ -59,8 +59,11 @@ Without these, every widget after Field and Checkbox would be built twice.
   `LANG`) and is a signal: `t()`/`t_with()` texts follow it, so switching updates exactly the widgets showing
   text. Plural rules, numbers and lists cover English and German; other languages and dates (ICU4X) when an app
   needs them. Keep the catalogs in sync with Kiesel Web by copying them. Example: `i18n`.
-- [ ] **S** **System settings.** More of the portal's appearance: accent colour (`accent-color` → Kiesel's accent),
-  contrast (→ `--ksl-contrast`), reduced motion (transitions to 1 ms, as on the web); font scale.
+- [x] **S** **System settings.** The portal's appearance beyond the colour scheme, followed live (`SystemPrefs`):
+  accent colour (`accent-color` → Kiesel's accent), contrast (`contrast` high → `--ksl-contrast: 2`), reduced
+  motion (`reduced-motion` or GNOME's `enable-animations`: no transitions, fades, glides or popup animations;
+  the theme changes in a cut) and text scale (GNOME's `text-scaling-factor`: text is shaped again at once, and
+  controls grow with it, as on GTK). Tested with `tests/settings-demo.sh`.
 - [ ] **S** **Shortcuts.** One keymap with platform modifiers (Ctrl, Cmd on macOS), shortcuts registered by
   widgets and the app, display strings for menus and `Kbd`.
 - [ ] **S** **Icons.** A script that takes the icons an app uses from the Lucide package into Rust data, with

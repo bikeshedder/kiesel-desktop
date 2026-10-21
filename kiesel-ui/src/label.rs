@@ -9,7 +9,7 @@ use vello_cpu::kurbo::{Rect, Size};
 use crate::i18n::IntoText;
 use crate::reactive::{MountCx, Watch};
 use crate::text::{self, wrap};
-use crate::theme::TextRole;
+use crate::theme::{TextRole, TextStyle};
 use crate::widget::{Available, Change, Known, LayoutCx, PaintCx, Widget, WidgetId};
 
 pub struct Label {
@@ -21,6 +21,8 @@ pub struct Label {
     role: TextRole,
     /// Shaped once; broken into lines again only when the width changes
     layout: Option<Layout<()>>,
+    /// What it was shaped with – the theme's text size can change
+    style: Option<TextStyle>,
     broken_at: Option<f32>,
     bounds: Rect,
 }
@@ -36,6 +38,7 @@ impl Label {
             text,
             role: TextRole::Body,
             layout: None,
+            style: None,
             broken_at: None,
             bounds: Rect::ZERO,
         }
@@ -61,6 +64,7 @@ impl Label {
 
     fn layout(&mut self, cx: &mut LayoutCx<'_>) -> &mut Layout<()> {
         let style = cx.theme.text_style(self.role);
+        self.style = Some(style);
         self.layout
             .get_or_insert_with(|| cx.text.paragraph(&self.shown, &style))
     }
@@ -88,9 +92,12 @@ impl Widget for Label {
         self.watch = Some(cx.watch(self.id, move || text.track()));
     }
 
-    /// New text: shape again, and its size may change
-    fn update(&mut self, _cx: &mut LayoutCx<'_>) -> Change {
-        if self.text.with_untracked(|t| *t == self.shown) {
+    /// New text or another text size: shape again, and its size may change
+    fn update(&mut self, cx: &mut LayoutCx<'_>) -> Change {
+        let restyled = self
+            .style
+            .is_some_and(|s| s != cx.theme.text_style(self.role));
+        if !restyled && self.text.with_untracked(|t| *t == self.shown) {
             return Change::NONE;
         }
         self.shown = self.text.with_untracked(String::clone);

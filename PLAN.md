@@ -65,7 +65,8 @@ kiesel-headless ime preedit ありが     # act as the input method: also commit
 kiesel-headless a11y                  # AT-SPI tree
 kiesel-headless a11y click "Save changes"   # also: focus, where (centre), box (x y w h) <name>
 kiesel-headless a11y set --role entry Name = Text   # also: value, caret [= offset]
-kiesel-headless portal dark           # the system's colour scheme, from a fake XDG portal
+kiesel-headless portal dark           # the system's colour scheme, from a fake XDG portal; also
+                                      # accent R G B, contrast high, motion reduce, text-scale 1.5
 kiesel-headless stop
 ```
 
@@ -79,6 +80,7 @@ wrapping on resize, that animation frames redraw only a small region, and that p
 `tests/list-demo.sh` scrolls by wheel, touchpad (momentum), keys and scrollbar, and checks AT-SPI scrollTo;
 `tests/todo-demo.sh` adds and removes widgets at runtime and watches memory.
 `tests/theme-demo.sh` follows a (fake) system preference, chooses, saves and restores the theme.
+`tests/settings-demo.sh` follows the portal's text scale, accent colour, contrast and reduced motion live.
 `tests/form-demo.sh` covers text input: keyboard editing, pointer selection, the Wayland clipboard both ways,
 the input method (on only while a field is focused), AT-SPI Text/EditableText, and the caret's frame cost.
 

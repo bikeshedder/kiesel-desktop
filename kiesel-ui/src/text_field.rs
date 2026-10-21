@@ -28,7 +28,7 @@ use crate::i18n::{IntoText, TextProp};
 use crate::paint;
 use crate::reactive::{MountCx, Watch};
 use crate::text::{self, Text};
-use crate::theme::{TextRole, Theme, space};
+use crate::theme::{TextRole, TextStyle, Theme, space};
 use crate::widget::{
     Available, Change, Event, EventCx, Ime, Known, LayoutCx, PaintCx, Widget, WidgetId,
     accessible_rect,
@@ -51,6 +51,8 @@ pub struct TextField {
     label: TextProp,
     grow: bool,
     placeholder_layout: Option<parley::Layout<()>>,
+    /// What the editor was set up with – the theme's text size can change
+    style: Option<TextStyle>,
     editor: PlainEditor<()>,
     /// The editor holds `value` as of the last sync (no composition)
     synced: String,
@@ -81,6 +83,7 @@ impl TextField {
             label: TextProp::default(),
             grow: false,
             placeholder_layout: None,
+            style: None,
             editor: PlainEditor::new(16.0),
             synced: String::new(),
             on_submit: None,
@@ -358,9 +361,14 @@ impl Widget for TextField {
 
     /// Picks up a value set from outside (not by typing), and repaints after events
     fn update(&mut self, cx: &mut LayoutCx<'_>) -> Change {
-        if self.editor.try_layout().is_none() {
-            // first update: font settings, then the initial value
-            let style = cx.theme.text_style(TextRole::Body);
+        let style = cx.theme.text_style(TextRole::Body);
+        let mut change = Change::NONE;
+        if self.style != Some(style) {
+            // first update, or another text size: font settings, then the value
+            if self.style.is_some() {
+                change = Change::LAYOUT;
+            }
+            self.style = Some(style);
             let styles = self.editor.edit_styles();
             styles.insert(StyleProperty::FontFamily(FontFamily::Source(
                 style.family.into(),
@@ -372,12 +380,12 @@ impl Widget for TextField {
             )));
             self.synced.clear();
             self.placeholder_layout = None;
+            self.repaint = true;
         }
         // the placeholder: shaped at first, and again when its text changes
         if self.placeholder.refresh()
             || (self.placeholder_layout.is_none() && !self.placeholder.shown.is_empty())
         {
-            let style = cx.theme.text_style(TextRole::Body);
             self.placeholder_layout = (!self.placeholder.shown.is_empty())
                 .then(|| cx.text.line(&self.placeholder.shown, &style));
             self.repaint = true;
@@ -397,10 +405,9 @@ impl Widget for TextField {
             self.run_ids.push(WidgetId::next());
         }
         if std::mem::take(&mut self.repaint) {
-            Change::PAINT
-        } else {
-            Change::NONE
+            change |= Change::PAINT;
         }
+        change
     }
 
     fn style(&self, _theme: &Theme) -> taffy::Style {

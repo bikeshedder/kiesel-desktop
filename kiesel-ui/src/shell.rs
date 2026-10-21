@@ -106,13 +106,18 @@ pub fn run(
     let mut root = Root::new(Box::new(root));
     widget::mount_all(root.as_mut(), &mut MountCx { inbox: &inbox });
     // the shell watches the scheme like a widget watches its signals
-    let scheme = options.theming.scheme();
+    let (scheme, prefs) = (options.theming.scheme(), options.theming.prefs());
     let scheme_watch = MountCx { inbox: &inbox }.watch(WidgetId::WINDOW, {
-        let scheme = scheme.clone();
-        move || scheme.track()
+        let (scheme, prefs) = (scheme.clone(), prefs.clone());
+        move || {
+            scheme.track();
+            prefs.track();
+        }
     });
+    let appearance = prefs.get_untracked().apply(&options.appearance);
     let app = Shell {
-        theme: Theme::new(scheme.get_untracked(), &options.appearance),
+        theme: Theme::new(scheme.get_untracked(), &appearance),
+        appearance,
         fade: None,
         _scheme_watch: scheme_watch,
         options,
@@ -164,6 +169,8 @@ struct Shell {
     /// The cross-fade to a new scheme, while it runs
     fade: Option<Fade>,
     _scheme_watch: Watch,
+    /// The app's appearance as the desktop wants it (accent, contrast, motion, text size)
+    appearance: Appearance,
     /// The app's content and the open popup layers
     root: Root,
     popups: PopupQueue,
@@ -466,7 +473,7 @@ impl Shell {
             match command {
                 Command::Open(mut layer) => {
                     layer.restore_focus = self.focused;
-                    layer.opened_at(now);
+                    layer.opened_at(now, self.theme.reduce_motion);
                     if self.focus_visible && self.focused == Some(layer.owner) {
                         focus_into = Some(layer.id());
                     }
@@ -863,17 +870,35 @@ impl Shell {
 
     /// The effective scheme changed: fade to it from whatever is on screen
     fn follow_scheme(&mut self) {
-        let scheme = self.options.theming.scheme().get_untracked();
+        let theming = &self.options.theming;
+        let scheme = theming.scheme().get_untracked();
+        let appearance = theming
+            .prefs()
+            .get_untracked()
+            .apply(&self.options.appearance);
         let heading_to = self
             .fade
             .as_ref()
             .map_or(self.theme.scheme, |f| f.to.scheme);
-        if scheme != heading_to {
-            self.fade = Some(Fade {
-                from: self.theme.clone(),
-                to: Theme::new(scheme, &self.options.appearance),
-                start: Instant::now(),
-            });
+        if scheme != heading_to || appearance != self.appearance {
+            let to = Theme::new(scheme, &appearance);
+            if appearance.text_scale != self.appearance.text_scale {
+                // other text sizes: everything is shaped and measured again, at
+                // once – sizes don't fade
+                self.theme.metrics = to.metrics;
+                self.invalidate_all();
+            }
+            if appearance.reduce_motion {
+                self.theme = to;
+                self.fade = None;
+            } else {
+                self.fade = Some(Fade {
+                    from: self.theme.clone(),
+                    to,
+                    start: Instant::now(),
+                });
+            }
+            self.appearance = appearance;
             self.full_damage = true;
             self.request_redraw();
         }

@@ -37,7 +37,7 @@ pub use switch::Switch;
 pub use text_field::TextField;
 pub use theme::{Appearance, ControlSize, Scheme, TextRole, Theme, space};
 pub use theme_switch::{IconToggle, ThemeSwitch};
-pub use theming::{ThemeMode, Theming};
+pub use theming::{SystemPrefs, ThemeMode, Theming};
 pub use widget::{Change, Event, Widget, WidgetId};
 
 pub use reactive::{MountCx, Watch};

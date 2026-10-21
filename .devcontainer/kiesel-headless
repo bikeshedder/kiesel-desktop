@@ -20,6 +20,10 @@
 #                                                         client has text input on)
 #   kiesel-headless portal light|dark|none                the system's colour-scheme preference, served
 #                                                         by a fake XDG portal (tools/fake-portal.py)
+#   kiesel-headless portal accent <r> <g> <b>|none        the accent colour (0 … 1 each)
+#   kiesel-headless portal contrast high|normal           the contrast preference
+#   kiesel-headless portal motion reduce|normal           the reduced-motion preference
+#   kiesel-headless portal text-scale <factor>            GNOME's text-scaling-factor
 #   kiesel-headless a11y                                  dump the AT-SPI tree of running apps
 #   kiesel-headless a11y click|focus <name>               act on the first node with that name
 #                                                         (--role <role> before the name narrows it,
@@ -125,24 +129,44 @@ stop() {
   rm -f "$STATE"/*.pid "$STATE/env" "$STATE/sway.env" "$STATE"/input.in "$STATE"/input.ack
 }
 
-# Starts the fake portal on first use, then sets its colour-scheme
+# Starts the fake portal on first use, then changes one of its settings
 portal() {
   load
-  local value
-  case "${1:-}" in
-    none) value=0 ;;
-    dark) value=1 ;;
-    light) value=2 ;;
-    *) die "portal light|dark|none" ;;
-  esac
   if ! kill -0 "$(cat "$STATE/portal.pid" 2>/dev/null)" 2>/dev/null; then
-    python3 "$WORKSPACE/tools/fake-portal.py" "$value" >"$STATE/portal.log" 2>&1 &
+    python3 "$WORKSPACE/tools/fake-portal.py" 0 >"$STATE/portal.log" 2>&1 &
     echo $! >"$STATE/portal.pid"
-    for _ in $(seq 50); do grep -q ready "$STATE/portal.log" 2>/dev/null && return; sleep 0.1; done
-    die "the fake portal did not start (see $STATE/portal.log)"
+    local ok=
+    for _ in $(seq 50); do grep -q ready "$STATE/portal.log" 2>/dev/null && { ok=1; break; }; sleep 0.1; done
+    [[ -n $ok ]] || die "the fake portal did not start (see $STATE/portal.log)"
   fi
+  local A=org.freedesktop.appearance
+  case "${1:-}" in
+    none) portal_set $A color-scheme "<uint32 0>" ;;
+    dark) portal_set $A color-scheme "<uint32 1>" ;;
+    light) portal_set $A color-scheme "<uint32 2>" ;;
+    accent)
+      if [[ "${2:-}" == none ]]; then
+        portal_set $A accent-color "<(-1.0, -1.0, -1.0)>"
+      else
+        [[ $# -eq 4 ]] || die "portal accent <r> <g> <b>|none"
+        portal_set $A accent-color "$(printf '<(%f, %f, %f)>' "$2" "$3" "$4")"
+      fi ;;
+    contrast)
+      case "${2:-}" in high) portal_set $A contrast "<uint32 1>" ;; normal) portal_set $A contrast "<uint32 0>" ;;
+        *) die "portal contrast high|normal" ;; esac ;;
+    motion)
+      case "${2:-}" in reduce) portal_set $A reduced-motion "<uint32 1>" ;; normal) portal_set $A reduced-motion "<uint32 0>" ;;
+        *) die "portal motion reduce|normal" ;; esac ;;
+    text-scale)
+      [[ -n "${2:-}" ]] || die "portal text-scale <factor>"
+      portal_set org.gnome.desktop.interface text-scaling-factor "$(printf '<%f>' "$2")" ;;
+    *) die "portal light|dark|none | accent R G B|none | contrast high|normal | motion reduce|normal | text-scale F" ;;
+  esac
+}
+
+portal_set() {
   gdbus call --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop \
-    --method org.kiesel.FakePortal.SetColorScheme "$value" >/dev/null
+    --method org.kiesel.FakePortal.Set "$1" "$2" "$3" >/dev/null
 }
 
 # Sends one command to kiesel-input and waits until it has been delivered

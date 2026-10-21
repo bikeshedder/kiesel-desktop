@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """A stand-in for xdg-desktop-portal's Settings interface on the session bus.
 
-Serves org.freedesktop.appearance color-scheme (0 = no preference, 1 = dark,
-2 = light) the way the real portal does – Read, ReadOne, ReadAll and the
-SettingChanged signal – so apps can follow "the system" in a headless
-session. kiesel-headless starts it and changes the value through the private
-org.kiesel.FakePortal.SetColorScheme method.
+Serves settings the way the real portal does – Read, ReadOne, ReadAll and the
+SettingChanged signal – so apps can follow the system in a headless session.
+It starts with org.freedesktop.appearance color-scheme (0 = no preference,
+1 = dark, 2 = light); kiesel-headless changes that and any other setting
+(accent-color, contrast, reduced-motion, GNOME's text-scaling-factor…)
+through the private org.kiesel.FakePortal.Set method.
 
-    fake-portal.py <initial: 0|1|2>
+    fake-portal.py <initial color-scheme: 0|1|2>
 """
 import sys
 
@@ -15,7 +16,6 @@ from gi.repository import Gio, GLib
 
 BUS_NAME = "org.freedesktop.portal.Desktop"
 PATH = "/org/freedesktop/portal/desktop"
-NAMESPACE, KEY = "org.freedesktop.appearance", "color-scheme"
 
 XML = """
 <node>
@@ -42,40 +42,49 @@ XML = """
     <property name="version" type="u" access="read"/>
   </interface>
   <interface name="org.kiesel.FakePortal">
-    <method name="SetColorScheme">
-      <arg type="u" name="value" direction="in"/>
+    <method name="Set">
+      <arg type="s" name="namespace" direction="in"/>
+      <arg type="s" name="key" direction="in"/>
+      <arg type="v" name="value" direction="in"/>
     </method>
   </interface>
 </node>
 """
 
-scheme = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-connection = None
+initial = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+settings = {("org.freedesktop.appearance", "color-scheme"): GLib.Variant("u", initial)}
+
+
+def matches(ns, patterns):
+    """ReadAll's namespaces: exact, or a trailing * for a prefix; none = all"""
+    return not patterns or any(
+        ns.startswith(p[:-1]) if p.endswith("*") else ns == p for p in patterns
+    )
 
 
 def on_call(conn, sender, path, interface, method, params, invocation):
-    global scheme
-    if method == "ReadOne":
-        ns, key = params.unpack()
-        if (ns, key) == (NAMESPACE, KEY):
-            invocation.return_value(GLib.Variant("(v)", (GLib.Variant("u", scheme),)))
-            return
-    elif method == "Read":
-        ns, key = params.unpack()
-        if (ns, key) == (NAMESPACE, KEY):
+    if method in ("ReadOne", "Read"):
+        found = settings.get(tuple(params.unpack()))
+        if found is not None:
             # the old Read wraps the value in one more variant
-            inner = GLib.Variant("v", GLib.Variant("u", scheme))
-            invocation.return_value(GLib.Variant("(v)", (inner,)))
+            value = found if method == "ReadOne" else GLib.Variant("v", found)
+            invocation.return_value(GLib.Variant("(v)", (value,)))
             return
     elif method == "ReadAll":
-        value = {NAMESPACE: {KEY: GLib.Variant("u", scheme)}}
+        (patterns,) = params.unpack()
+        value = {}
+        for (ns, key), v in settings.items():
+            if matches(ns, patterns):
+                value.setdefault(ns, {})[key] = v
         invocation.return_value(GLib.Variant("(a{sa{sv}})", (value,)))
         return
-    elif method == "SetColorScheme":
-        (scheme,) = params.unpack()
+    elif method == "Set":
+        ns, key = params.get_child_value(0).get_string(), params.get_child_value(1).get_string()
+        value = params.get_child_value(2).get_variant()
+        settings[(ns, key)] = value
         conn.emit_signal(
             None, PATH, "org.freedesktop.portal.Settings", "SettingChanged",
-            GLib.Variant("(ssv)", (NAMESPACE, KEY, GLib.Variant("u", scheme))),
+            GLib.Variant("(ssv)", (ns, key, value)),
         )
         invocation.return_value(None)
         return

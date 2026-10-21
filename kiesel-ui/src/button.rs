@@ -21,7 +21,7 @@ use crate::i18n::{IntoText, TextProp};
 use crate::paint::{self, TOLERANCE};
 use crate::reactive::{MountCx, Watch};
 use crate::text;
-use crate::theme::{Color, Theme, mix};
+use crate::theme::{Color, TextStyle, Theme, mix};
 use crate::widget::{
     Available, Change, Event, EventCx, Known, LayoutCx, PaintCx, Widget, WidgetId, accessible_rect,
 };
@@ -38,6 +38,8 @@ pub struct Button {
     /// What assistive technology announces, if not the label
     accessible_name: Option<TextProp>,
     layout: Option<Layout<()>>,
+    /// What the label was shaped with – the theme's text size can change
+    style: Option<TextStyle>,
     bounds: Rect,
     radius: f64,
     loading: ArcSignal<bool>,
@@ -68,6 +70,7 @@ impl Button {
             label: TextProp::new(label),
             accessible_name: None,
             layout: None,
+            style: None,
             bounds: Rect::ZERO,
             radius: 0.0,
             loading: ArcSignal::stored(false),
@@ -162,8 +165,9 @@ impl Widget for Button {
             self.sync(cx.now, cx.theme);
             change = Change::LAYOUT;
         }
-        if self.label.refresh() {
-            // another text (another language): shape it again; the width may change
+        let restyled = self.style.is_some_and(|s| s != cx.theme.control_text());
+        if self.label.refresh() || restyled {
+            // another text (another language) or size: shape it again; the width may change
             self.layout = None;
             change = Change::LAYOUT;
         }
@@ -181,6 +185,7 @@ impl Widget for Button {
     fn measure(&mut self, cx: &mut LayoutCx<'_>, _known: Known, _available: Available) -> Size {
         let m = &cx.theme.metrics;
         let style = cx.theme.control_text();
+        self.style = Some(style);
         let layout = self
             .layout
             .get_or_insert_with(|| cx.text.line(&self.label.shown, &style));

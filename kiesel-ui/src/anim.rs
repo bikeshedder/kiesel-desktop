@@ -182,6 +182,9 @@ impl Transition {
         let Some(start) = self.start else {
             return self.to;
         };
+        if duration <= 0.0 {
+            return self.to;
+        }
         let t = now.duration_since(start).as_secs_f64() / duration;
         if t >= 1.0 {
             return self.to;

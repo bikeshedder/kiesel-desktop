@@ -113,8 +113,8 @@ impl Switch {
     fn sync(&mut self, now: Instant, theme: &Theme) {
         let on = |b: bool| f64::from(u8::from(b));
         let pressed = (self.hovered && self.pointer_armed) || self.key_armed;
-        let mut changed = self.slide.set(on(self.shown), now, SLIDE);
-        changed |= self.stretch.set(on(pressed), now, STRETCH);
+        let mut changed = self.slide.set(on(self.shown), now, theme.motion(SLIDE));
+        changed |= self.stretch.set(on(pressed), now, theme.motion(STRETCH));
         changed |= self.ring.set(
             on(self.focused && self.focus_visible),
             now,
@@ -190,8 +190,8 @@ impl Widget for Switch {
     }
 
     fn animating(&self, now: Instant, theme: &Theme) -> bool {
-        self.slide.animating(now, SLIDE)
-            || self.stretch.animating(now, STRETCH)
+        self.slide.animating(now, theme.motion(SLIDE))
+            || self.stretch.animating(now, theme.motion(STRETCH))
             || self.ring.animating(now, theme.metrics.duration)
     }
 
@@ -285,8 +285,8 @@ impl Widget for Switch {
         paint::inset_shadows(ctx, track, radius, &track_shadows, 1.0);
 
         // the knob: slides (overshooting with the spring) and stretches towards the middle while pressed
-        let pos = self.slide.value(now, SLIDE);
-        let extra = h * 0.18 * self.stretch.value(now, STRETCH);
+        let pos = self.slide.value(now, theme.motion(SLIDE));
+        let extra = h * 0.18 * self.stretch.value(now, theme.motion(STRETCH));
         let k = h - 2.0 * pad;
         let x = track.x0 + pad + pos * (w - h - extra);
         let knob = Rect::new(x, track.y0 + pad, x + k + extra, track.y0 + pad + k);

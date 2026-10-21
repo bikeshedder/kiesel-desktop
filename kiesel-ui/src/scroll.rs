@@ -169,7 +169,7 @@ impl Scroll {
         }
     }
 
-    fn glide_to(&mut self, to: f64, now: Instant) {
+    fn glide_to(&mut self, to: f64, now: Instant, theme: &Theme) {
         self.settle(now);
         // successive wheel notches add up to where the last glide was going
         let base = match self.motion {
@@ -177,6 +177,10 @@ impl Scroll {
             _ => self.offset,
         };
         let to = (to - self.offset + base).clamp(0.0, self.max_offset());
+        if theme.reduce_motion {
+            self.jump_to(to, now);
+            return;
+        }
         self.motion = Motion::Glide {
             from: self.offset,
             to,
@@ -349,7 +353,7 @@ impl Widget for Scroll {
                 match *delta {
                     ScrollDelta::Lines(d) => {
                         let step = self.bounds.height().powf(2.0 / 3.0);
-                        self.glide_to(self.offset + d.y * step, now);
+                        self.glide_to(self.offset + d.y * step, now, cx.theme);
                     }
                     ScrollDelta::Pixels(d) => {
                         self.settle(now);
@@ -394,7 +398,7 @@ impl Widget for Scroll {
                 };
                 if let Some(to) = to {
                     cx.handled = true;
-                    self.glide_to(to, now);
+                    self.glide_to(to, now, cx.theme);
                 }
             }
             Event::PointerEnter | Event::PointerMove(_) | Event::PointerLeave => {
@@ -426,7 +430,7 @@ impl Widget for Scroll {
                     } else {
                         self.page()
                     };
-                    self.glide_to(self.offset + page, now);
+                    self.glide_to(self.offset + page, now, cx.theme);
                 }
                 self.repaint = true;
             }

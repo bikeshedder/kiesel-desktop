@@ -18,7 +18,49 @@ use reactive_graph::signal::ArcRwSignal;
 use reactive_graph::traits::{Get, GetUntracked, Set};
 use reactive_graph::wrappers::read::ArcSignal;
 
-use crate::theme::Scheme;
+use crate::theme::{Appearance, Color, Scheme};
+
+/// What the desktop asks of apps besides light and dark
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SystemPrefs {
+    /// The desktop's accent colour, if it has one (GNOME 47 and later, KDE)
+    pub accent: Option<Color>,
+    /// Higher contrast
+    pub high_contrast: bool,
+    /// Fewer animations
+    pub reduce_motion: bool,
+    /// Larger (or smaller) text
+    pub text_scale: f32,
+}
+
+impl Default for SystemPrefs {
+    fn default() -> Self {
+        Self {
+            accent: None,
+            high_contrast: false,
+            reduce_motion: false,
+            text_scale: 1.0,
+        }
+    }
+}
+
+impl SystemPrefs {
+    /// `base` as the desktop wants it: its accent, high contrast (Kiesel's contrast
+    /// 2), reduced motion, text scale
+    pub fn apply(&self, base: &Appearance) -> Appearance {
+        Appearance {
+            accent_color: self.accent.unwrap_or(base.accent_color),
+            contrast: if self.high_contrast {
+                2.0
+            } else {
+                base.contrast
+            },
+            reduce_motion: base.reduce_motion || self.reduce_motion,
+            text_scale: base.text_scale * self.text_scale,
+            ..*base
+        }
+    }
+}
 
 /// What the user chose
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -53,6 +95,7 @@ impl ThemeMode {
 pub struct Theming {
     mode: ArcRwSignal<ThemeMode>,
     system: ArcRwSignal<Option<Scheme>>,
+    prefs: ArcRwSignal<SystemPrefs>,
     scheme: ArcSignal<Scheme>,
     /// Saves the mode when it changes (kept alive with the handle)
     _save: Option<Arc<ImmediateEffect>>,
@@ -86,8 +129,9 @@ impl Theming {
     fn build(mode: ThemeMode) -> Self {
         let mode = ArcRwSignal::new(mode);
         let system = ArcRwSignal::new(None);
+        let prefs = ArcRwSignal::new(SystemPrefs::default());
         #[cfg(target_os = "linux")]
-        portal::follow(system.clone());
+        portal::follow(system.clone(), prefs.clone());
         let scheme = ArcSignal::derive({
             let (mode, system) = (mode.clone(), system.clone());
             move || match mode.get() {
@@ -99,8 +143,21 @@ impl Theming {
         Self {
             mode,
             system,
+            prefs,
             scheme,
             _save: None,
+        }
+    }
+
+    /// The desktop's other appearance settings: accent, contrast, motion, text size
+    pub fn prefs(&self) -> ArcSignal<SystemPrefs> {
+        self.prefs.clone().into()
+    }
+
+    /// For tests and platforms that report these themselves
+    pub fn set_prefs(&self, prefs: SystemPrefs) {
+        if self.prefs.get_untracked() != prefs {
+            self.prefs.set(prefs);
         }
     }
 
@@ -172,18 +229,28 @@ fn save(file: &PathBuf, mode: ThemeMode) {
 mod portal {
     //! The XDG desktop portal's appearance settings, over D-Bus
     use reactive_graph::signal::ArcRwSignal;
-    use reactive_graph::traits::Set;
+    use reactive_graph::traits::{GetUntracked, Set};
     use zbus::blocking::{Connection, Proxy};
     use zbus::zvariant::{OwnedValue, Value};
 
-    use crate::theme::Scheme;
+    use super::SystemPrefs;
+    use crate::theme::{Color, Scheme};
 
-    const NAMESPACE: &str = "org.freedesktop.appearance";
-    const KEY: &str = "color-scheme";
+    const APPEARANCE: &str = "org.freedesktop.appearance";
+    /// GNOME's own keys, which its portal also serves: animations and text size
+    const GNOME: &str = "org.gnome.desktop.interface";
+    const KEYS: [(&str, &str); 6] = [
+        (APPEARANCE, "color-scheme"),
+        (APPEARANCE, "accent-color"),
+        (APPEARANCE, "contrast"),
+        (APPEARANCE, "reduced-motion"),
+        (GNOME, "enable-animations"),
+        (GNOME, "text-scaling-factor"),
+    ];
 
-    /// Reads the preference now (so the first frame is right) and follows its
-    /// changes on a thread; without a portal the preference stays unknown
-    pub fn follow(system: ArcRwSignal<Option<Scheme>>) {
+    /// Reads the settings now (so the first frame is right) and follows their
+    /// changes on a thread; without a portal nothing is known and defaults hold
+    pub fn follow(system: ArcRwSignal<Option<Scheme>>, prefs: ArcRwSignal<SystemPrefs>) {
         let Ok(conn) = Connection::session() else {
             return;
         };
@@ -192,7 +259,13 @@ mod portal {
         let Ok(changes) = proxy.receive_signal("SettingChanged") else {
             return;
         };
-        system.set(read(&proxy));
+        let mut now = SystemPrefs::default();
+        for (ns, key) in KEYS {
+            if let Some(value) = read(&proxy, ns, key) {
+                apply(&mut now, &system, ns, key, &value);
+            }
+        }
+        prefs.set(now);
         let _ = std::thread::Builder::new()
             .name("kiesel-portal".into())
             .spawn(move || {
@@ -203,8 +276,10 @@ mod portal {
                     else {
                         continue;
                     };
-                    if ns == NAMESPACE && key == KEY {
-                        system.set(scheme_of(&value));
+                    let mut p = prefs.get_untracked();
+                    apply(&mut p, &system, &ns, &key, &value);
+                    if p != prefs.get_untracked() {
+                        prefs.set(p);
                     }
                 }
             });
@@ -219,22 +294,73 @@ mod portal {
         )
     }
 
-    fn read(proxy: &Proxy<'_>) -> Option<Scheme> {
+    fn read(proxy: &Proxy<'_>, ns: &str, key: &str) -> Option<OwnedValue> {
         // ReadOne (portal v2); older portals only have Read, which wraps the value once more
-        let value: OwnedValue = proxy
-            .call("ReadOne", &(NAMESPACE, KEY))
-            .or_else(|_| proxy.call("Read", &(NAMESPACE, KEY)))
-            .ok()?;
-        scheme_of(&value)
+        proxy
+            .call("ReadOne", &(ns, key))
+            .or_else(|_| proxy.call("Read", &(ns, key)))
+            .ok()
     }
 
-    /// 1 = prefers dark, 2 = prefers light, 0 = no preference
-    fn scheme_of(value: &Value<'_>) -> Option<Scheme> {
-        match value {
-            Value::Value(inner) => scheme_of(inner),
-            Value::U32(1) => Some(Scheme::Dark),
-            Value::U32(2) => Some(Scheme::Light),
-            _ => None,
+    fn apply(
+        prefs: &mut SystemPrefs,
+        system: &ArcRwSignal<Option<Scheme>>,
+        ns: &str,
+        key: &str,
+        value: &Value<'_>,
+    ) {
+        let value = unwrap(value);
+        match (ns, key) {
+            // 1 = prefers dark, 2 = prefers light, 0 = no preference
+            (APPEARANCE, "color-scheme") => {
+                let scheme = match value {
+                    Value::U32(1) => Some(Scheme::Dark),
+                    Value::U32(2) => Some(Scheme::Light),
+                    _ => None,
+                };
+                if system.get_untracked() != scheme {
+                    system.set(scheme);
+                }
+            }
+            // (r, g, b) in 0 … 1; outside that range: no accent
+            (APPEARANCE, "accent-color") => {
+                prefs.accent = match value {
+                    Value::Structure(s) => {
+                        let c: Vec<f64> = s
+                            .fields()
+                            .iter()
+                            .filter_map(|f| f64::try_from(f).ok())
+                            .collect();
+                        (c.len() == 3 && c.iter().all(|v| (0.0..=1.0).contains(v)))
+                            .then(|| Color::new([c[0] as f32, c[1] as f32, c[2] as f32, 1.0]))
+                    }
+                    _ => None,
+                };
+            }
+            // 1 = higher contrast
+            (APPEARANCE, "contrast") => prefs.high_contrast = matches!(value, Value::U32(1)),
+            // 1 = reduced motion
+            (APPEARANCE, "reduced-motion") => prefs.reduce_motion = matches!(value, Value::U32(1)),
+            (GNOME, "enable-animations") => {
+                if let Value::Bool(on) = value {
+                    prefs.reduce_motion = !on;
+                }
+            }
+            (GNOME, "text-scaling-factor") => {
+                if let Value::F64(f) = value
+                    && (0.5..=3.0).contains(f)
+                {
+                    prefs.text_scale = *f as f32;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn unwrap<'a>(v: &'a Value<'a>) -> &'a Value<'a> {
+        match v {
+            Value::Value(inner) => unwrap(inner),
+            v => v,
         }
     }
 }
