@@ -15,6 +15,7 @@
 #   kiesel-headless a11y                                  dump the AT-SPI tree of running apps
 #   kiesel-headless a11y click|focus <name>               act on the first node with that name
 #   kiesel-headless a11y where <name>                     its centre in logical coordinates
+#   kiesel-headless a11y box <name>                       its x y width height (logical)
 #   kiesel-headless stop
 #
 # Software rendering only: sway uses the pixman renderer, clients get Mesa's
@@ -175,15 +176,15 @@ if verb == "click":
     action.doAction(names.index("click"))
 elif verb == "focus":
     acc.queryComponent().grabFocus()
-elif verb == "where":
+elif verb in ("where", "box"):
     # Wayland windows sit at the origin here (one tiled window); extents are pixels
     import os
     scale = float(os.environ.get("KIESEL_HEADLESS_SCALE", "1"))
-    x, y, w, h = acc.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-    print(f"{(x + w / 2) / scale:.0f} {(y + h / 2) / scale:.0f}")
+    x, y, w, h = (v / scale for v in acc.queryComponent().getExtents(pyatspi.DESKTOP_COORDS))
+    print(f"{x + w / 2:.0f} {y + h / 2:.0f}" if verb == "where" else f"{x:.0f} {y:.0f} {w:.0f} {h:.0f}")
 else:
     sys.exit(f"unknown a11y verb {verb}")
 EOF
     ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
+  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
 esac
