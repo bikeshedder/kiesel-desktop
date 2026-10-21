@@ -1,6 +1,6 @@
 # Kiesel Desktop: the native Rust toolkit, tested headless.
 # A headless sway (wlroots, pixman renderer) is the Wayland compositor; Mesa's
-# lavapipe/llvmpipe give wgpu a software Vulkan/GL; grim, wtype and wlrctl take
+# lavapipe/llvmpipe give wgpu a software Vulkan/GL; grim and tools/kiesel-input take
 # screenshots and send keys and pointer clicks; a D-Bus session with AT-SPI lets
 # AccessKit's tree be read back. `kiesel-headless` (below) wires it together.
 FROM mcr.microsoft.com/devcontainers/rust:2-1-trixie
@@ -11,8 +11,9 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     # build: winit/wayland/xkbcommon/fontconfig headers
     pkg-config libwayland-dev libxkbcommon-dev libfontconfig-dev libudev-dev \
-    # headless Wayland compositor + screenshots, keyboard and pointer input, clipboard
-    sway grim wtype wlrctl wl-clipboard \
+    # headless Wayland compositor + screenshots and clipboard (pointer and keyboard
+    # input come from tools/kiesel-input: wlrctl/wtype drop their devices per call)
+    sway grim wl-clipboard \
     # software GPU: Vulkan (lavapipe) and GL/EGL (llvmpipe) for wgpu
     mesa-vulkan-drivers libgl1-mesa-dri libegl1 libegl-mesa0 libvulkan1 vulkan-tools mesa-utils \
     # D-Bus session + AT-SPI to inspect the accessibility tree (AccessKit)

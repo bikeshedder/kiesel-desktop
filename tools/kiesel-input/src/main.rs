@@ -1,28 +1,39 @@
-//! A virtual pointer that lives as long as the headless session.
+//! A virtual pointer and keyboard that live as long as the headless session.
 //!
-//! `wlrctl` creates a pointer per command and drops it right away, so the seat
-//! only has pointer capability for an instant and clients bind `wl_pointer` too
-//! late to see anything. This helper keeps one pointer and reads commands, one
-//! per line, from a FIFO; after each it writes `ok` (or `error: …`) to the ack FIFO.
+//! `wlrctl` and `wtype` create a device per command and drop it right away, so
+//! the seat has pointer/keyboard capability only for an instant and clients
+//! bind `wl_pointer`/`wl_keyboard` too late to see anything. This helper keeps
+//! one of each and reads commands, one per line, from a FIFO; after each it
+//! writes `ok` (or `error: …`) to the ack FIFO.
 //!
 //!   kiesel-input <width> <height> <command-fifo> <ack-fifo>
 //!
-//! Commands (logical coordinates): `move x y`, `down [button]`, `up [button]`,
+//! Pointer (logical coordinates): `move x y`, `down [button]`, `up [button]`,
 //! `click x y [button]`, `scroll dy` – buttons: left, right, middle.
+//!
+//! Keyboard (us layout): `key <combo>`, `keydown <combo>`, `keyup <combo>`,
+//! `type <text>` – a combo is xkb key names joined by `+`, e.g. `Tab`,
+//! `shift+Tab`, `ctrl+a`, `space`, `Return`, `Escape`.
 
 use std::io::{BufRead, BufReader, Write};
+use std::os::fd::AsFd;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use wayland_client::protocol::{wl_pointer, wl_registry, wl_seat};
+use wayland_client::protocol::{wl_keyboard, wl_pointer, wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
+use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
+    zwp_virtual_keyboard_manager_v1 as vk_manager, zwp_virtual_keyboard_v1 as vk,
+};
 use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1 as manager, zwlr_virtual_pointer_v1 as vp,
 };
+use xkbcommon::xkb;
 
 #[derive(Default)]
 struct State {
     seat: Option<wl_seat::WlSeat>,
     manager: Option<manager::ZwlrVirtualPointerManagerV1>,
+    keyboards: Option<vk_manager::ZwpVirtualKeyboardManagerV1>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State {
@@ -47,6 +58,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 "zwlr_virtual_pointer_manager_v1" => {
                     state.manager = Some(registry.bind(name, version.min(2), qh, ()))
                 }
+                "zwp_virtual_keyboard_manager_v1" => {
+                    state.keyboards = Some(registry.bind(name, 1, qh, ()))
+                }
                 _ => {}
             }
         }
@@ -56,6 +70,8 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
 wayland_client::delegate_noop!(State: ignore wl_seat::WlSeat);
 wayland_client::delegate_noop!(State: manager::ZwlrVirtualPointerManagerV1);
 wayland_client::delegate_noop!(State: vp::ZwlrVirtualPointerV1);
+wayland_client::delegate_noop!(State: vk_manager::ZwpVirtualKeyboardManagerV1);
+wayland_client::delegate_noop!(State: vk::ZwpVirtualKeyboardV1);
 
 fn now_ms() -> u32 {
     SystemTime::now()
@@ -101,46 +117,225 @@ impl Pointer {
         self.vp.button(now_ms(), code, state);
         self.vp.frame();
     }
+}
 
+/// A key on the us keymap: its xkb keycode and whether it needs Shift
+#[derive(Clone, Copy)]
+struct Key {
+    code: xkb::Keycode,
+    shift: bool,
+}
+
+struct Keyboard {
+    vk: vk::ZwpVirtualKeyboardV1,
+    keymap: xkb::Keymap,
+    state: xkb::State,
+}
+
+impl Keyboard {
+    fn new(vk: vk::ZwpVirtualKeyboardV1) -> Result<Self, String> {
+        let ctx = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+        let keymap =
+            xkb::Keymap::new_from_names(&ctx, "", "", "us", "", None, xkb::KEYMAP_COMPILE_NO_FLAGS)
+                .ok_or("cannot compile the us keymap (xkb-data missing?)")?;
+        // the keymap goes to the compositor as a file; it is read up to the NUL
+        let mut text = keymap
+            .get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1)
+            .into_bytes();
+        text.push(0);
+        let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+        let path = format!("{dir}/kiesel-input-keymap-{}", std::process::id());
+        let mut file = std::fs::File::create_new(&path).map_err(|e| e.to_string())?;
+        file.write_all(&text).map_err(|e| e.to_string())?;
+        let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let _ = std::fs::remove_file(&path);
+        vk.keymap(
+            wl_keyboard::KeymapFormat::XkbV1.into(),
+            file.as_fd(),
+            text.len() as u32,
+        );
+        let state = xkb::State::new(&keymap);
+        Ok(Self { vk, keymap, state })
+    }
+
+    /// Finds the key producing `sym`, on level 0 or (with Shift) level 1
+    fn find(&self, sym: xkb::Keysym) -> Option<Key> {
+        let (min, max) = (
+            self.keymap.min_keycode().raw(),
+            self.keymap.max_keycode().raw(),
+        );
+        for level in 0..2 {
+            for raw in min..=max {
+                let code = xkb::Keycode::new(raw);
+                if self
+                    .keymap
+                    .key_get_syms_by_level(code, 0, level)
+                    .contains(&sym)
+                {
+                    return Some(Key {
+                        code,
+                        shift: level == 1,
+                    });
+                }
+            }
+        }
+        None
+    }
+
+    fn named(&self, name: &str) -> Result<Key, String> {
+        let alias = match name.to_ascii_lowercase().as_str() {
+            "shift" => "Shift_L",
+            "ctrl" | "control" => "Control_L",
+            "alt" => "Alt_L",
+            "super" | "logo" => "Super_L",
+            "enter" => "Return",
+            "esc" => "Escape",
+            "space" => "space",
+            _ => name,
+        };
+        let mut sym = xkb::keysym_from_name(alias, xkb::KEYSYM_NO_FLAGS);
+        if sym.raw() == 0 {
+            sym = xkb::keysym_from_name(alias, xkb::KEYSYM_CASE_INSENSITIVE);
+        }
+        if sym.raw() == 0 {
+            return Err(format!("unknown key {name}"));
+        }
+        self.find(sym)
+            .ok_or(format!("{name} is not on the us keymap"))
+    }
+
+    fn combo(&self, spec: &str) -> Result<Vec<Key>, String> {
+        let mut keys = Vec::new();
+        for part in spec.split('+') {
+            let key = self.named(part)?;
+            if key.shift {
+                keys.push(self.named("Shift_L")?);
+            }
+            keys.push(Key {
+                shift: false,
+                ..key
+            });
+        }
+        Ok(keys)
+    }
+
+    fn send(&mut self, key: Key, down: bool) {
+        let direction = if down {
+            xkb::KeyDirection::Down
+        } else {
+            xkb::KeyDirection::Up
+        };
+        // wayland key codes are evdev codes: xkb keycode - 8
+        self.vk.key(now_ms(), key.code.raw() - 8, u32::from(down));
+        self.state.update_key(key.code, direction);
+        self.vk.modifiers(
+            self.state.serialize_mods(xkb::STATE_MODS_DEPRESSED),
+            self.state.serialize_mods(xkb::STATE_MODS_LATCHED),
+            self.state.serialize_mods(xkb::STATE_MODS_LOCKED),
+            self.state.serialize_layout(xkb::STATE_LAYOUT_EFFECTIVE),
+        );
+    }
+
+    fn press(&mut self, keys: &[Key]) {
+        for &k in keys {
+            self.send(k, true);
+        }
+    }
+
+    fn release(&mut self, keys: &[Key]) {
+        for &k in keys.iter().rev() {
+            self.send(k, false);
+        }
+    }
+}
+
+struct Devices {
+    pointer: Pointer,
+    keyboard: Keyboard,
+}
+
+impl Devices {
     fn run(
-        &self,
+        &mut self,
         line: &str,
         queue: &mut EventQueue<State>,
         state: &mut State,
     ) -> Result<(), String> {
-        let mut words = line.split_whitespace();
+        let (cmd, rest) = line.trim().split_once(' ').unwrap_or((line.trim(), ""));
+        let mut words = rest.split_whitespace();
         let num = |w: Option<&str>| {
             w.ok_or("missing number")?
                 .parse::<f64>()
                 .map_err(|e| e.to_string())
         };
-        match words.next() {
-            Some("move") => self.move_to(num(words.next())?, num(words.next())?),
-            Some("down") => self.button(button_code(words.next())?, true),
-            Some("up") => self.button(button_code(words.next())?, false),
-            Some("click") => {
+        let mut sync = |state: &mut State| {
+            queue
+                .roundtrip(state)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        };
+        match cmd {
+            "move" => self.pointer.move_to(num(words.next())?, num(words.next())?),
+            "down" => self.pointer.button(button_code(words.next())?, true),
+            "up" => self.pointer.button(button_code(words.next())?, false),
+            "click" => {
                 let (x, y) = (num(words.next())?, num(words.next())?);
                 let code = button_code(words.next())?;
-                self.move_to(x, y);
+                self.pointer.move_to(x, y);
                 // let the client see the motion before the press, like a hand would
-                queue.roundtrip(state).map_err(|e| e.to_string())?;
-                self.button(code, true);
-                queue.roundtrip(state).map_err(|e| e.to_string())?;
-                self.button(code, false);
+                sync(state)?;
+                self.pointer.button(code, true);
+                sync(state)?;
+                self.pointer.button(code, false);
             }
-            Some("scroll") => {
-                self.vp.axis(
+            "scroll" => {
+                self.pointer.vp.axis(
                     now_ms(),
                     wl_pointer::Axis::VerticalScroll,
                     num(words.next())?,
                 );
-                self.vp.frame();
+                self.pointer.vp.frame();
             }
-            Some(other) => return Err(format!("unknown command {other}")),
-            None => return Ok(()),
+            "key" => {
+                let keys = self.keyboard.combo(rest.trim())?;
+                self.keyboard.press(&keys);
+                sync(state)?;
+                self.keyboard.release(&keys);
+            }
+            "keydown" => {
+                let keys = self.keyboard.combo(rest.trim())?;
+                self.keyboard.press(&keys);
+            }
+            "keyup" => {
+                let keys = self.keyboard.combo(rest.trim())?;
+                self.keyboard.release(&keys);
+            }
+            "type" => {
+                for ch in rest.chars() {
+                    let key = self
+                        .keyboard
+                        .find(xkb::utf32_to_keysym(u32::from(ch)))
+                        .ok_or(format!("{ch:?} is not on the us keymap"))?;
+                    let keys = if key.shift {
+                        vec![
+                            self.keyboard.named("Shift_L")?,
+                            Key {
+                                shift: false,
+                                ..key
+                            },
+                        ]
+                    } else {
+                        vec![key]
+                    };
+                    self.keyboard.press(&keys);
+                    self.keyboard.release(&keys);
+                    sync(state)?;
+                }
+            }
+            "" => return Ok(()),
+            other => return Err(format!("unknown command {other}")),
         }
-        queue.roundtrip(state).map_err(|e| e.to_string())?;
-        Ok(())
+        sync(state)
     }
 }
 
@@ -155,12 +350,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     conn.display().get_registry(&qh, ());
     let mut state = State::default();
     queue.roundtrip(&mut state)?;
-    let (Some(seat), Some(manager)) = (&state.seat, &state.manager) else {
-        return Err("compositor lacks wl_seat or zwlr_virtual_pointer_manager_v1".into());
+    let (Some(seat), Some(manager), Some(keyboards)) =
+        (&state.seat, &state.manager, &state.keyboards)
+    else {
+        return Err("compositor lacks wl_seat or the virtual pointer/keyboard protocols".into());
     };
-    let pointer = Pointer {
-        vp: manager.create_virtual_pointer(Some(seat), &qh, ()),
-        extent: (w.parse()?, h.parse()?),
+    let mut devices = Devices {
+        pointer: Pointer {
+            vp: manager.create_virtual_pointer(Some(seat), &qh, ()),
+            extent: (w.parse()?, h.parse()?),
+        },
+        keyboard: Keyboard::new(keyboards.create_virtual_keyboard(seat, &qh, ()))?,
     };
     queue.roundtrip(&mut state)?;
 
@@ -169,7 +369,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let reader = BufReader::new(std::fs::File::open(commands)?);
         for line in reader.lines() {
             let line = line?;
-            let reply = match pointer.run(&line, &mut queue, &mut state) {
+            let reply = match devices.run(&line, &mut queue, &mut state) {
                 Ok(()) => "ok".to_string(),
                 Err(e) => format!("error: {e}"),
             };

@@ -9,8 +9,12 @@
 #   kiesel-headless click <x> <y> [left|right|middle]     move there and click
 #   kiesel-headless down|up [button]                      press / release (drag, hold)
 #   kiesel-headless scroll <dy>                           vertical scroll in logical pixels
-#   kiesel-headless key <wtype args…>                     type text / keys (e.g. -k Return)
+#   kiesel-headless key <combo>                           press and release, e.g. Tab, shift+Tab, space
+#   kiesel-headless keydown|keyup <combo>                 hold / let go
+#   kiesel-headless type <text>                           type text (us layout)
 #   kiesel-headless a11y                                  dump the AT-SPI tree of running apps
+#   kiesel-headless a11y click|focus <name>               act on the first node with that name
+#   kiesel-headless a11y where <name>                     its centre in logical coordinates
 #   kiesel-headless stop
 #
 # Software rendering only: sway uses the pixman renderer, clients get Mesa's
@@ -77,13 +81,14 @@ EOF
   for _ in $(seq 100); do [[ -s "$STATE/sway.env" ]] && break; sleep 0.1; done
   [[ -s "$STATE/sway.env" ]] || { cat "$STATE/sway.log" >&2; stop; die "sway did not come up"; }
 
-  # One virtual pointer for the whole session (tools/kiesel-input): a pointer
-  # per command (wlrctl) appears and vanishes before clients can bind it
+  # One virtual pointer and keyboard for the whole session (tools/kiesel-input):
+  # a device per command (wlrctl, wtype) appears and vanishes before clients
+  # can bind it
   local input="$WORKSPACE/target/debug/kiesel-input"
-  [[ -x "$input" ]] || cargo build -q --manifest-path "$WORKSPACE/Cargo.toml" -p kiesel-input
-  mkfifo "$STATE/pointer.in" "$STATE/pointer.ack"
+  cargo build -q --manifest-path "$WORKSPACE/Cargo.toml" -p kiesel-input
+  mkfifo "$STATE/input.in" "$STATE/input.ack"
   env -u DISPLAY XDG_RUNTIME_DIR="$RUN_DIR" $(cat "$STATE/sway.env") \
-    "$input" "${size%x*}" "${size#*x}" "$STATE/pointer.in" "$STATE/pointer.ack" >"$STATE/input.log" 2>&1 &
+    "$input" "${size%x*}" "${size#*x}" "$STATE/input.in" "$STATE/input.ack" >"$STATE/input.log" 2>&1 &
   echo $! >"$STATE/input.pid"
 
   {
@@ -101,15 +106,15 @@ stop() {
   for p in input sway atspi dbus; do
     [[ -f "$STATE/$p.pid" ]] && kill "$(cat "$STATE/$p.pid")" 2>/dev/null || true
   done
-  rm -f "$STATE"/*.pid "$STATE/env" "$STATE/sway.env" "$STATE"/pointer.*
+  rm -f "$STATE"/*.pid "$STATE/env" "$STATE/sway.env" "$STATE"/input.in "$STATE"/input.ack
 }
 
 # Sends one command to kiesel-input and waits until it has been delivered
-pointer() {
+input() {
   need
   kill -0 "$(cat "$STATE/input.pid" 2>/dev/null)" 2>/dev/null || die "kiesel-input is not running (see $STATE/input.log)"
-  exec 3<>"$STATE/pointer.ack"
-  echo "$*" >"$STATE/pointer.in"
+  exec 3<>"$STATE/input.ack"
+  echo "$*" >"$STATE/input.in"
   local reply
   read -r -t 5 reply <&3 || die "no answer from kiesel-input"
   exec 3>&-
@@ -123,15 +128,18 @@ case "$cmd" in
   env) need; sed 's/^/export /' "$STATE/env"; echo "unset DISPLAY" ;;
   run) load; exec "$@" ;;
   shot) load; exec grim -o "$OUTPUT" "${1:-shot.png}" ;;
-  key) load; exec wtype "$@" ;;
-  move) [[ $# -eq 2 ]] || die "move <x> <y>"; pointer move "$@" ;;
-  click) [[ $# -ge 2 ]] || die "click <x> <y> [button]"; pointer click "$@" ;;
-  down | up) pointer "$cmd" "$@" ;;
-  scroll) [[ $# -eq 1 ]] || die "scroll <dy>"; pointer scroll "$1" ;;
+  move) [[ $# -eq 2 ]] || die "move <x> <y>"; input move "$@" ;;
+  click) [[ $# -ge 2 ]] || die "click <x> <y> [button]"; input click "$@" ;;
+  down | up) input "$cmd" "$@" ;;
+  scroll) [[ $# -eq 1 ]] || die "scroll <dy>"; input scroll "$1" ;;
+  key | keydown | keyup) [[ $# -eq 1 ]] || die "$cmd <combo>"; input "$cmd" "$1" ;;
+  type) [[ $# -ge 1 ]] || die "type <text>"; input type "$*" ;;
   a11y)
     load
-    exec python3 - <<'EOF'
+    exec python3 - "$@" <<'EOF'
+import sys
 import pyatspi
+
 def walk(acc, depth=0):
     try:
         states = [pyatspi.stateToString(s) for s in acc.getState().getStates()
@@ -141,8 +149,41 @@ def walk(acc, depth=0):
             walk(child, depth + 1)
     except Exception as e:
         print(f"{'  ' * depth}<{e}>")
-walk(pyatspi.Registry.getDesktop(0))
+
+def find(acc, name):
+    if acc.name == name and acc.getRoleName() != "application":
+        return acc
+    for child in acc:
+        hit = find(child, name)
+        if hit:
+            return hit
+    return None
+
+desktop = pyatspi.Registry.getDesktop(0)
+if len(sys.argv) == 1:
+    walk(desktop)
+    sys.exit()
+verb, name = sys.argv[1], " ".join(sys.argv[2:])
+acc = find(desktop, name)
+if acc is None:
+    sys.exit(f"no accessible named {name!r}")
+if verb == "click":
+    action = acc.queryAction()
+    names = [action.getName(i) for i in range(action.nActions)]
+    if "click" not in names:
+        sys.exit(f"{name!r} has no click action (has {names})")
+    action.doAction(names.index("click"))
+elif verb == "focus":
+    acc.queryComponent().grabFocus()
+elif verb == "where":
+    # Wayland windows sit at the origin here (one tiled window); extents are pixels
+    import os
+    scale = float(os.environ.get("KIESEL_HEADLESS_SCALE", "1"))
+    x, y, w, h = acc.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+    print(f"{(x + w / 2) / scale:.0f} {(y + h / 2) / scale:.0f}")
+else:
+    sys.exit(f"unknown a11y verb {verb}")
 EOF
     ;;
-  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
+  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
 esac
