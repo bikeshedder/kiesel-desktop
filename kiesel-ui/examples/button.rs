@@ -6,11 +6,13 @@
 //!   kiesel-headless run cargo run --example button
 
 use kiesel_ui::kurbo::Size;
-use kiesel_ui::{ArcRwSignal, Button, Options, Row, Set, Update};
+use kiesel_ui::{Align, ArcRwSignal, Button, Flex, Justify, Options, Set, Update, space};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let saving = ArcRwSignal::new(false);
-    let row = Row::new(12.0)
+    let buttons = Flex::cluster()
+        .gap(space(2) + 4.0)
+        .justify(Justify::Center)
         .child(Button::new("Reset").on_click({
             let saving = saving.clone();
             move || saving.set(false)
@@ -18,17 +20,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .child(
             Button::new("Save changes")
                 .loading(saving.clone())
-                .on_click({
-                    let saving = saving.clone();
-                    move || saving.update(|s| *s = !*s)
-                }),
+                .on_click(move || saving.update(|s| *s = !*s)),
         );
+    let root = Flex::stack()
+        .justify(Justify::Center)
+        .align(Align::Center)
+        .padding(space(3))
+        .child(buttons);
     kiesel_ui::run(
         Options {
             title: "Kiesel – Button".into(),
             size: Size::new(480.0, 300.0),
             appearance: Default::default(),
         },
-        row,
+        root,
     )
 }

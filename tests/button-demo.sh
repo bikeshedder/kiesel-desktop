@@ -17,7 +17,15 @@ cargo build -q --release --example button -p kiesel-ui
 BIN=target/release/examples/button
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
-differ() { python3 -c "import sys; from PIL import Image; a, b = (Image.open(p).convert('RGB') for p in sys.argv[1:3]); sys.exit(0 if a.tobytes() != b.tobytes() else 1)" "$1" "$2"; }
+# two screenshots differ when a channel moves by more than 2: partial and full
+# redraws may round the same pixel one step apart
+differ() {
+  python3 -c "
+import sys
+from PIL import Image, ImageChops
+a, b = (Image.open(p).convert('RGB') for p in sys.argv[1:3])
+sys.exit(0 if max(hi for _, hi in ImageChops.difference(a, b).getextrema()) > 2 else 1)" "$1" "$2"
+}
 # width of the knobs' faces along the row through the centre: they are lighter
 # than the page in both schemes
 face_width() {

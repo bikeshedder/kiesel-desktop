@@ -31,10 +31,12 @@ Goal: far less memory than a WebView. No browser, no JS, no Tauri.
 | Button demo, windowed, loading (spinner running), 640×400 @ 2× = 1280×800 px | 12.5 MiB PSS, 19.7 MiB RSS |
 | same at 1× | 9.2 MiB PSS, 13.4 MiB RSS |
 | Two-button demo with AccessKit active (AT-SPI listening), loading, 1280×800 px | 16.0 MiB PSS, 23.4 MiB RSS, 4 threads |
+| Dialog demo (card, wrapped text, two buttons), AccessKit active, loading, 1280×840 px | 19.3 MiB PSS, 25.2 MiB peak RSS |
 
 Estimates (not measured yet, needs real hardware): GPU path with wgpu on Mesa ~50–90 MB, on NVIDIA ~120–200 MB.
 Full CPU redraws took ~55 ms in the unoptimised probe (120 blurred cards) → damage regions and cached shadows are required for dense screens.
-The button demo redraws the full 1280×800 px window in ~1.4 ms (release, median).
+The button demo redraws the full 1280×800 px window in ~1.4 ms (release, median). With damage tracking, the
+dialog's spinner frames redraw ~5 % of the window in ~1.2 ms; full frames at 1280×840 px take 4–6 ms.
 
 ## Testing headless
 
@@ -48,12 +50,14 @@ kiesel-headless move 640 400          # logical coordinates (tools/kiesel-input)
 kiesel-headless click 640 400         # also: down, up, scroll <dy>
 kiesel-headless key shift+Tab         # also: keydown, keyup, type <text> (us layout)
 kiesel-headless a11y                  # AT-SPI tree
-kiesel-headless a11y click "Save changes"   # also: focus <name>, where <name>
+kiesel-headless a11y click "Save changes"   # also: focus, where (centre), box (x y w h) <name>
 kiesel-headless stop
 ```
 
 `tests/button-demo.sh` drives the demo by pointer, keyboard and assistive technology – light and dark, scale 1
-and 2 – and finds the buttons through the accessibility tree, not by coordinates.
+and 2 – and finds the buttons through the accessibility tree, not by coordinates. `tests/dialog-demo.sh` checks
+wrapping on resize, that animation frames redraw only a small region, and that partial redraws match full ones
+(`KIESEL_FULL_REDRAW=1`) within ±2 per channel – the same pixel can round one step apart at another origin.
 
 `wlrctl`/`wtype` create a device per call, which clients never get to bind; `tools/kiesel-input` keeps one virtual
 pointer and keyboard for the whole session. Open: no IME and no portal (file dialogs) in the headless session yet.
@@ -68,5 +72,13 @@ pointer and keyboard for the whole session. Open: no IME and no portal (file dia
    until a key is pressed); Button activation as in browsers (Space on release, Enter on press); AccessKit through
    `accesskit_unix` directly (accesskit_winit pins winit 0.30) – Window and Button nodes with busy, focus, Click
    and Focus actions. The demo's two buttons share a `reactive_graph` signal.
-3. Text and layout through parley + taffy; damage tracking.
-4. Port components following kiesel's ROADMAP order.
+3. ✅ **Layout, text, partial redraws** – taffy lays out a persistent mirror of the widget tree (containers give a
+   `Style`, leaves measure; only dirty leaves are measured again); `Flex::stack` / `Flex::cluster` (Kiesel's Stack
+   and Cluster), `Card`, and `Label` (parley paragraphs wrapping at min/max-content or the given width, type scale:
+   body, title, caption). Widgets report `Change { layout, paint }` from `update()` and their `ink()`; the shell
+   redraws only the damaged region (rendered into its own pixmap and copied, or straight into the buffer above
+   half the window), merged with the damage since the buffer was last shown (softbuffer's buffer age), and presents
+   it with damage. Example: `cargo run --example dialog`.
+4. Port components following kiesel's ROADMAP order. Before many more widgets: reactive updates instead of
+   polling every widget in `update()` (effects on the signals), and text input with IME (the headless session
+   needs an input method for that).

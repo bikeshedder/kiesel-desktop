@@ -15,6 +15,7 @@ parley = "0.12"
 bytemuck = "1"
 accesskit = "0.25"
 reactive_graph = "0.2.16"
+taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 accesskit_unix = "0.24"

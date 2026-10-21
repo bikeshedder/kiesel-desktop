@@ -2,25 +2,17 @@
 
 use parley::{
     Alignment, AlignmentOptions, FontContext, FontFamily, FontWeight, Layout, LayoutContext,
-    PositionedLayoutItem, StyleProperty,
+    LineHeight, PositionedLayoutItem, StyleProperty,
 };
 use vello_cpu::kurbo::{Affine, Point};
 use vello_cpu::{Glyph, RenderContext, Resources};
 
-use crate::theme::Color;
+use crate::theme::{Color, TextStyle};
 
 /// Font database and layout scratch space – one per application
 pub struct Text {
     fonts: FontContext,
     layouts: LayoutContext<()>,
-}
-
-pub struct TextStyle<'a> {
-    pub family: &'a str,
-    pub size: f32,
-    pub weight: f32,
-    /// In em, like CSS `letter-spacing: 0.01em`
-    pub letter_spacing: f32,
 }
 
 impl Default for Text {
@@ -33,8 +25,8 @@ impl Default for Text {
 }
 
 impl Text {
-    /// One line, no wrapping (`white-space: nowrap`)
-    pub fn line(&mut self, text: &str, style: &TextStyle<'_>) -> Layout<()> {
+    /// Shaped text, not yet broken into lines – see [`wrap`]
+    pub fn paragraph(&mut self, text: &str, style: &TextStyle) -> Layout<()> {
         let mut b = self
             .layouts
             .ranged_builder(&mut self.fonts, text, 1.0, true);
@@ -46,11 +38,24 @@ impl Text {
         b.push_default(StyleProperty::LetterSpacing(
             style.letter_spacing * style.size,
         ));
-        let mut layout = b.build(text);
-        layout.break_all_lines(None);
-        layout.align(Alignment::Start, AlignmentOptions::default());
+        b.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+            style.line_height,
+        )));
+        b.build(text)
+    }
+
+    /// One line, no wrapping (`white-space: nowrap`)
+    pub fn line(&mut self, text: &str, style: &TextStyle) -> Layout<()> {
+        let mut layout = self.paragraph(text, style);
+        wrap(&mut layout, None);
         layout
     }
+}
+
+/// Breaks `layout` into lines no wider than `width` (`None`: only at hard breaks)
+pub fn wrap(layout: &mut Layout<()>, width: Option<f32>) {
+    layout.break_all_lines(width);
+    layout.align(Alignment::Start, AlignmentOptions::default());
 }
 
 /// Draws `layout` with its top-left corner at `origin`, on top of the context's transform

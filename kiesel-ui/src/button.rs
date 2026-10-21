@@ -18,9 +18,11 @@ use winit::keyboard::{Key, NamedKey};
 
 use crate::anim::Transition;
 use crate::paint::{self, TOLERANCE};
-use crate::text::{self, TextStyle};
+use crate::text;
 use crate::theme::{Color, Theme, mix};
-use crate::widget::{Event, EventCx, LayoutCx, PaintCx, Widget, WidgetId, accessible_rect};
+use crate::widget::{
+    Available, Change, Event, EventCx, Known, LayoutCx, PaintCx, Widget, WidgetId, accessible_rect,
+};
 
 /// The spinner box is 1.25em (the icon's place), the spinner itself 1.05em
 const SPINNER_BOX_EM: f64 = 1.25;
@@ -46,6 +48,8 @@ pub struct Button {
     key_armed: bool,
     focused: bool,
     focus_visible: bool,
+    /// Its look changed since the last update
+    repaint: bool,
     hover: Transition,
     press: Transition,
     ring: Transition,
@@ -68,6 +72,7 @@ impl Button {
             key_armed: false,
             focused: false,
             focus_visible: false,
+            repaint: false,
             hover: Transition::new(0.0),
             press: Transition::new(0.0),
             ring: Transition::new(0.0),
@@ -101,14 +106,13 @@ impl Button {
         let d = theme.metrics.duration;
         let live = !self.shown_loading;
         let pressed = (self.hovered && self.pointer_armed) || self.key_armed;
-        self.hover
-            .set(f64::from(u8::from(live && self.hovered)), now, d);
-        self.press.set(f64::from(u8::from(live && pressed)), now, d);
-        self.ring.set(
-            f64::from(u8::from(self.focused && self.focus_visible)),
-            now,
-            d,
-        );
+        let target = |on: bool| f64::from(u8::from(on));
+        let mut changed = self.hover.set(target(live && self.hovered), now, d);
+        changed |= self.press.set(target(live && pressed), now, d);
+        changed |= self
+            .ring
+            .set(target(self.focused && self.focus_visible), now, d);
+        self.repaint |= changed;
     }
 }
 
@@ -117,8 +121,9 @@ impl Widget for Button {
         self.id
     }
 
-    /// Inline padding + [spinner + gap] + label; at least `--ksl-control` high
-    fn measure(&mut self, cx: &mut LayoutCx<'_>) -> Size {
+    /// Picks up `loading` (it changes the width) and repaints after events
+    fn update(&mut self, cx: &mut LayoutCx<'_>) -> Change {
+        let mut change = Change::NONE;
         let loading = self.loading.get_untracked();
         if loading != self.shown_loading {
             if loading {
@@ -126,19 +131,22 @@ impl Widget for Button {
             }
             self.shown_loading = loading;
             self.sync(cx.now, cx.theme);
+            change = Change::LAYOUT;
         }
+        if std::mem::take(&mut self.repaint) {
+            change |= Change::PAINT;
+        }
+        change
+    }
+
+    /// Inline padding + [spinner + gap] + label; at least `--ksl-control` high.
+    /// Never narrower: a button doesn't wrap or shrink.
+    fn measure(&mut self, cx: &mut LayoutCx<'_>, _known: Known, _available: Available) -> Size {
         let m = &cx.theme.metrics;
-        let layout = self.layout.get_or_insert_with(|| {
-            cx.text.line(
-                &self.label,
-                &TextStyle {
-                    family: m.font_family,
-                    size: m.font_size,
-                    weight: m.font_weight,
-                    letter_spacing: 0.01,
-                },
-            )
-        });
+        let style = cx.theme.control_text();
+        let layout = self
+            .layout
+            .get_or_insert_with(|| cx.text.line(&self.label, &style));
         let mut content = f64::from(layout.width());
         if self.shown_loading {
             content += SPINNER_BOX_EM * f64::from(m.font_size) + m.gap;
@@ -149,13 +157,27 @@ impl Widget for Button {
         )
     }
 
-    fn place(&mut self, cx: &mut LayoutCx<'_>, bounds: Rect) {
+    fn style(&self, _theme: &Theme) -> taffy::Style {
+        taffy::Style {
+            flex_shrink: 0.0,
+            ..Default::default()
+        }
+    }
+
+    fn set_bounds(&mut self, cx: &mut LayoutCx<'_>, bounds: Rect) {
         self.bounds = bounds;
         self.radius = cx.theme.metrics.radius;
     }
 
     fn bounds(&self) -> Rect {
         self.bounds
+    }
+
+    /// The farthest shadow is the hover one, `3px 5px 10px` (σ = 5, cut off at
+    /// 2.5 σ): 9.5 px left, 7.5 up, 15.5 right, 17.5 down; the ring adds 3 all round
+    fn ink(&self) -> Rect {
+        let b = self.bounds;
+        Rect::new(b.x0 - 10.0, b.y0 - 8.0, b.x1 + 16.0, b.y1 + 18.0)
     }
 
     fn hit(&self, p: Point) -> bool {

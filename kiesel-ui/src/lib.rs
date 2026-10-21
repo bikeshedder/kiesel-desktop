@@ -3,18 +3,23 @@
 mod a11y;
 pub mod anim;
 pub mod button;
+pub mod card;
+pub mod flex;
+pub mod label;
+mod layout;
 pub mod paint;
-pub mod row;
 pub mod shell;
 pub mod text;
 pub mod theme;
 pub mod widget;
 
 pub use button::Button;
-pub use row::Row;
+pub use card::Card;
+pub use flex::{Align, Flex, Justify};
+pub use label::Label;
 pub use shell::{Options, run};
-pub use theme::{Appearance, Scheme, Theme};
-pub use widget::{Event, Widget, WidgetId};
+pub use theme::{Appearance, Scheme, TextRole, Theme, space};
+pub use widget::{Change, Event, Widget, WidgetId};
 
 pub use reactive_graph::signal::ArcRwSignal;
 pub use reactive_graph::traits::{GetUntracked, Set, Update};

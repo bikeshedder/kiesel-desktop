@@ -76,7 +76,10 @@ pub struct Theme {
     pub scheme: Scheme,
     pub bg: Color,
     pub surface_sunken: Color,
+    /// `--ksl-card-bg`: the tonal surface of cards
+    pub card_bg: Color,
     pub text_1: Color,
+    pub text_2: Color,
     pub text_3: Color,
     pub accent: Color,
     pub accent_2: Color,
@@ -98,6 +101,8 @@ pub struct Metrics {
     pub control: f64,
     /// `--ksl-radius`
     pub radius: f64,
+    /// `--ksl-radius-lg` (cards)
+    pub radius_lg: f64,
     /// `--size-4`, the button's inline padding
     pub padding_x: f64,
     /// `--size-2`
@@ -131,7 +136,9 @@ impl Theme {
         let (
             bg,
             sunken,
+            card_bg,
             text_1,
+            text_2,
             text_3,
             accent,
             accent_2,
@@ -147,7 +154,9 @@ impl Theme {
             Scheme::Light => (
                 n(0.949, 0.0058),
                 n(0.921, 0.0087),
+                n(0.970, 0.0041),
                 n(0.310, 0.0360),
+                n(0.470, 0.0350),
                 n(0.585, 0.0300),
                 oklch(0.57, ac.min(0.18), ah, 1.0),
                 oklch(0.50, (ac * 1.08).min(0.19), ah, 1.0),
@@ -163,7 +172,9 @@ impl Theme {
             Scheme::Dark => (
                 n(0.275, 0.0240),
                 n(0.230, 0.0200),
+                n(0.295, 0.0250),
                 n(0.920, 0.0120),
+                n(0.780, 0.0200),
                 n(0.640, 0.0260),
                 oklch(0.76, (ac * 0.85).min(0.15), ah, 1.0),
                 oklch(0.81, (ac * 0.77).min(0.14), ah, 1.0),
@@ -182,7 +193,9 @@ impl Theme {
             scheme,
             bg,
             surface_sunken: sunken,
+            card_bg,
             text_1,
+            text_2,
             text_3,
             accent,
             accent_2,
@@ -208,6 +221,7 @@ impl Theme {
             metrics: Metrics {
                 control: 40.0 * f64::from(ap.density),
                 radius: 6.0 * f64::from(ap.roundness),
+                radius_lg: 12.0 * f64::from(ap.roundness),
                 padding_x: 20.0,
                 gap: 8.0,
                 font_size: 16.0,
@@ -215,6 +229,75 @@ impl Theme {
                 font_family: "Inter, system-ui, sans-serif",
                 duration: 0.180,
             },
+        }
+    }
+}
+
+/// The Open Props spacing steps used by Kiesel (`--size-1` … `--size-10`), in logical pixels
+pub fn space(step: u8) -> f64 {
+    const STEPS: [f64; 11] = [
+        0.0, 4.0, 8.0, 16.0, 20.0, 24.0, 28.0, 32.0, 48.0, 64.0, 80.0,
+    ];
+    STEPS[usize::from(step.min(10))]
+}
+
+/// Text roles of the type scale
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextRole {
+    /// Body text: `--font-size-1`, line height 1.5, `--ksl-text-2` (as in a card's body)
+    Body,
+    /// Headings: `--font-size-2`, weight 600, line height 1.25, `--ksl-text-1`
+    Title,
+    /// Captions and subtitles: `--font-size-0`, `--ksl-text-3`
+    Caption,
+}
+
+/// Font settings of one piece of text
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextStyle {
+    pub family: &'static str,
+    pub size: f32,
+    pub weight: f32,
+    /// In em, like CSS `letter-spacing: 0.01em`
+    pub letter_spacing: f32,
+    /// Relative to the font size, like CSS `line-height: 1.5`
+    pub line_height: f32,
+}
+
+impl Theme {
+    pub fn text_style(&self, role: TextRole) -> TextStyle {
+        let family = self.metrics.font_family;
+        let (size, weight, line_height) = match role {
+            TextRole::Body => (16.0, 400.0, 1.5),
+            TextRole::Title => (17.6, 600.0, 1.25),
+            TextRole::Caption => (12.0, 400.0, 1.5),
+        };
+        TextStyle {
+            family,
+            size,
+            weight,
+            letter_spacing: 0.0,
+            line_height,
+        }
+    }
+
+    pub fn text_color(&self, role: TextRole) -> Color {
+        match role {
+            TextRole::Body => self.text_2,
+            TextRole::Title => self.text_1,
+            TextRole::Caption => self.text_3,
+        }
+    }
+
+    /// The button label: `--font-size-1`, weight 600, letter-spacing 0.01em
+    pub fn control_text(&self) -> TextStyle {
+        let m = &self.metrics;
+        TextStyle {
+            family: m.font_family,
+            size: m.font_size,
+            weight: m.font_weight,
+            letter_spacing: 0.01,
+            line_height: 1.5,
         }
     }
 }

@@ -73,12 +73,69 @@ pub struct PaintCx<'a> {
     pub res: &'a mut Resources,
     pub theme: &'a Theme,
     pub now: Instant,
+    /// The region being redrawn (logical); widgets whose ink misses it can be skipped
+    pub clip: Rect,
+}
+
+impl PaintCx<'_> {
+    /// Paints the children whose ink reaches the redrawn region
+    pub fn paint_children(&mut self, children: &[Box<dyn Widget>]) {
+        for child in children {
+            if child.ink().overlaps(self.clip) {
+                child.paint(self);
+            }
+        }
+    }
 }
 
 pub struct EventCx<'a> {
     pub theme: &'a Theme,
     pub now: Instant,
 }
+
+/// What changed since the last update – reported by [`Widget::update`]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Change {
+    /// Its size may have changed: measure again
+    pub layout: bool,
+    /// It looks different: redraw its ink
+    pub paint: bool,
+}
+
+impl Change {
+    pub const NONE: Self = Self {
+        layout: false,
+        paint: false,
+    };
+    pub const PAINT: Self = Self {
+        layout: false,
+        paint: true,
+    };
+    pub const LAYOUT: Self = Self {
+        layout: true,
+        paint: true,
+    };
+}
+
+impl std::ops::BitOr for Change {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self {
+            layout: self.layout || rhs.layout,
+            paint: self.paint || rhs.paint,
+        }
+    }
+}
+
+impl std::ops::BitOrAssign for Change {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = *self | rhs;
+    }
+}
+
+/// Constraints for [`Widget::measure`], straight from taffy
+pub type Known = taffy::Size<Option<f32>>;
+pub type Available = taffy::Size<taffy::AvailableSpace>;
 
 pub trait Widget {
     fn id(&self) -> WidgetId;
@@ -91,18 +148,34 @@ pub trait Widget {
         &mut []
     }
 
-    /// Natural size
-    fn measure(&mut self, cx: &mut LayoutCx<'_>) -> Size;
+    /// Its box in layout: display, direction, gaps, padding, size limits (taffy)
+    fn style(&self, _theme: &Theme) -> taffy::Style {
+        taffy::Style::default()
+    }
 
-    /// Takes the given bounds (logical pixels, window coordinates); containers place their children
-    fn place(&mut self, cx: &mut LayoutCx<'_>, bounds: Rect);
+    /// Leaves only (containers are sized by taffy from their children):
+    /// the size for the given constraints
+    fn measure(&mut self, _cx: &mut LayoutCx<'_>, _known: Known, _available: Available) -> Size {
+        Size::ZERO
+    }
+
+    /// The result of layout, in window coordinates (logical pixels)
+    fn set_bounds(&mut self, cx: &mut LayoutCx<'_>, bounds: Rect);
 
     fn bounds(&self) -> Rect;
 
+    /// Everything it paints, shadows and rings included (for redrawing only what changed)
+    fn ink(&self) -> Rect {
+        self.bounds()
+    }
+
+    /// Called before every layout: picks up signals and state changed by events
+    fn update(&mut self, _cx: &mut LayoutCx<'_>) -> Change {
+        Change::NONE
+    }
+
     fn paint(&self, cx: &mut PaintCx<'_>) {
-        for child in self.children() {
-            child.paint(cx);
-        }
+        cx.paint_children(self.children());
     }
 
     fn hit(&self, p: Point) -> bool {
@@ -208,23 +281,52 @@ pub(crate) fn accessible_rect(r: Rect) -> accesskit::Rect {
     }
 }
 
-pub(crate) fn any_animating(w: &dyn Widget, now: Instant, theme: &Theme) -> bool {
-    w.animating(now, theme)
-        || w.children()
-            .iter()
-            .any(|c| any_animating(c.as_ref(), now, theme))
+/// The ink of every widget that is animating
+pub(crate) fn animating_inks(w: &dyn Widget, now: Instant, theme: &Theme, out: &mut Vec<Rect>) {
+    if w.animating(now, theme) {
+        out.push(w.ink());
+    }
+    for child in w.children() {
+        animating_inks(child.as_ref(), now, theme, out);
+    }
+}
+
+/// Runs [`Widget::update`] everywhere; returns the ids that need layout and the inks to redraw
+pub(crate) fn update_all(
+    w: &mut dyn Widget,
+    cx: &mut LayoutCx<'_>,
+    relayout: &mut Vec<WidgetId>,
+    repaint: &mut Vec<Rect>,
+) {
+    let change = w.update(cx);
+    if change.layout {
+        relayout.push(w.id());
+    }
+    if change.paint {
+        repaint.push(w.ink());
+    }
+    for child in w.children_mut() {
+        update_all(child.as_mut(), cx, relayout, repaint);
+    }
+}
+
+/// Every widget's ink, by id
+pub(crate) fn inks(w: &dyn Widget, out: &mut std::collections::HashMap<WidgetId, Rect>) {
+    out.insert(w.id(), w.ink());
+    for child in w.children() {
+        inks(child.as_ref(), out);
+    }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use crate::layout::Layout;
     use crate::theme::{Appearance, Scheme};
-    use crate::{Button, Row};
+    use crate::{Button, Card, Flex, Justify, Label};
 
-    fn laid_out() -> (Row, WidgetId, WidgetId) {
-        let (a, b) = (Button::new("One"), Button::new("Two"));
-        let (ia, ib) = (a.id(), b.id());
-        let mut row = Row::new(10.0).child(a).child(b);
+    /// Lays `root` out in a window of `size`
+    pub(crate) fn lay_out(root: &mut dyn Widget, size: Size) {
         let theme = Theme::new(Scheme::Light, &Appearance::default());
         let mut text = Text::default();
         let mut cx = LayoutCx {
@@ -232,31 +334,40 @@ mod tests {
             text: &mut text,
             now: Instant::now(),
         };
-        row.place(&mut cx, Rect::new(0.0, 0.0, 400.0, 100.0));
+        let (mut relayout, mut repaint) = (Vec::new(), Vec::new());
+        update_all(root, &mut cx, &mut relayout, &mut repaint);
+        Layout::default().run(root, &mut cx, size, &relayout);
+    }
+
+    fn two_buttons() -> (Flex, WidgetId, WidgetId) {
+        let (a, b) = (Button::new("One"), Button::new("Two"));
+        let (ia, ib) = (a.id(), b.id());
+        let mut row = Flex::cluster().justify(Justify::Center).child(a).child(b);
+        lay_out(&mut row, Size::new(400.0, 100.0));
         (row, ia, ib)
     }
 
     #[test]
     fn hit_test_finds_the_deepest_widget() {
-        let (row, a, b) = laid_out();
+        let (row, a, b) = two_buttons();
         let ca = find(&row, a).unwrap().bounds().center();
         let cb = find(&row, b).unwrap().bounds().center();
         assert_eq!(hit_test(&row, ca), Some(a));
         assert_eq!(hit_test(&row, cb), Some(b));
-        // between the buttons: the row itself
+        // above the buttons: the row itself
         assert_eq!(hit_test(&row, Point::new(200.0, 2.0)), Some(row.id()));
         assert_eq!(hit_test(&row, Point::new(-5.0, 50.0)), None);
     }
 
     #[test]
     fn focus_order_is_document_order() {
-        let (row, a, b) = laid_out();
+        let (row, a, b) = two_buttons();
         assert_eq!(focus_order(&row), vec![a, b]);
     }
 
     #[test]
     fn accessibility_skips_unexposed_containers() {
-        let (row, a, b) = laid_out();
+        let (row, a, b) = two_buttons();
         let mut nodes = Vec::new();
         let top = accessibility_nodes(&row, &mut nodes);
         assert_eq!(top, vec![a.node(), b.node()]);
@@ -266,5 +377,42 @@ mod tests {
                 .iter()
                 .all(|(_, n)| n.role() == accesskit::Role::Button)
         );
+    }
+
+    #[test]
+    fn cluster_centres_and_gaps() {
+        let (row, a, b) = two_buttons();
+        let (ra, rb) = (
+            find(&row, a).unwrap().bounds(),
+            find(&row, b).unwrap().bounds(),
+        );
+        assert_eq!(rb.x0 - ra.x1, 16.0, "gap --size-3");
+        assert!(
+            ((ra.x0 - 0.0) - (400.0 - rb.x1)).abs() <= 1.0,
+            "centred: {ra:?} {rb:?}"
+        );
+        assert_eq!(ra.height(), 40.0, "--ksl-control");
+    }
+
+    #[test]
+    fn labels_wrap_to_the_card() {
+        let text =
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor.";
+        let label = Label::new(text);
+        let id = label.id();
+        let mut card = Card::new().max_width(300.0).child(label);
+        lay_out(&mut card, Size::new(800.0, 600.0));
+        assert_eq!(card.bounds().width(), 300.0, "max-width");
+        let l = find(&card, id).unwrap().bounds();
+        assert_eq!(l.width(), 300.0 - 2.0 * 24.0, "padding --size-5");
+        assert!(
+            l.height() >= 3.0 * 24.0,
+            "16px × 1.5 per line, several lines: {l:?}"
+        );
+
+        let mut wide = Card::new().child(Label::new(text));
+        lay_out(&mut wide, Size::new(2000.0, 600.0));
+        let one_line = wide.children()[0].bounds().height();
+        assert!(one_line < 30.0, "one line when there is room: {one_line}");
     }
 }

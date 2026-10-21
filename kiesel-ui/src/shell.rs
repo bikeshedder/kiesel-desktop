@@ -1,10 +1,15 @@
 //! The window shell: winit window, softbuffer surface, vello_cpu rendering,
-//! input routing, focus and accessibility.
+//! layout, input routing, focus and accessibility.
 //!
-//! vello_cpu renders straight into softbuffer's buffer (no second full-size
-//! pixmap) and the channels are swapped in place: RGBA bytes → 0RGB words.
-//! Frames are only drawn on demand – while something animates, each frame asks
-//! for the next one, paced by the compositor's frame callbacks.
+//! Frames are drawn on demand and only where something changed. Widgets report
+//! changes from [`Widget::update`] (and layout moves them); the shell collects
+//! their inks into a damage rectangle and redraws just that: a small region is
+//! rendered into its own pixmap and copied into softbuffer's buffer, a large one
+//! straight into the buffer. Since softbuffer cycles buffers, the region also
+//! covers what changed in the frames since this buffer was last shown (its age).
+//! While something animates, each frame asks for the next one, paced by the
+//! compositor's frame callbacks; one more frame follows the end of an animation
+//! so transitions settle on their final value.
 //!
 //! Input: the pointer goes to the deepest widget under it; a press captures it
 //! until release (only the captured widget counts as hovered meanwhile). Keys
@@ -12,12 +17,13 @@
 //! Focus from the keyboard or assistive technology is visible (`:focus-visible`),
 //! focus from a pointer press is not – until the next key press.
 
+use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroU32;
 use std::time::Instant;
 
 use softbuffer::{Context, Surface};
 use vello_cpu::kurbo::{Affine, Point, Rect, Size};
-use vello_cpu::{RenderContext, Resources};
+use vello_cpu::{Pixmap, RenderContext, Resources};
 use winit::application::ApplicationHandler;
 use winit::cursor::{Cursor, CursorIcon};
 use winit::event::{ButtonSource, ElementState, KeyEvent, MouseButton, WindowEvent};
@@ -26,6 +32,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Theme as WinitTheme, Window, WindowAttributes, WindowId};
 
 use crate::a11y::Accessibility;
+use crate::layout::Layout;
 use crate::text::Text;
 use crate::theme::{Appearance, Scheme, Theme};
 use crate::widget::{
@@ -37,6 +44,11 @@ pub struct Options {
     pub size: Size,
     pub appearance: Appearance,
 }
+
+/// Regions above this share of the window are rendered straight into the buffer
+const PARTIAL_MAX: f64 = 0.5;
+/// Damage of this many past frames is kept for buffer ages
+const HISTORY: usize = 4;
 
 pub fn run(
     options: Options,
@@ -56,11 +68,21 @@ pub fn run(
         options,
         root: Box::new(root),
         text: Text::default(),
+        layout: Layout::default(),
+        needs_layout: true,
         window: None,
         render: None,
+        partial: None,
         res: Resources::new(),
+        damage: None,
+        full_damage: true,
+        history: VecDeque::new(),
+        buffer_size: (0, 0),
+        animating: Vec::new(),
         cursor: CursorIcon::Default,
         stats: std::env::var_os("KIESEL_STATS").is_some(),
+        // KIESEL_FULL_REDRAW=1 redraws everything every frame (to compare against)
+        always_full: std::env::var_os("KIESEL_FULL_REDRAW").is_some(),
         pointer: None,
         hovered: None,
         captured: None,
@@ -79,11 +101,26 @@ struct Shell {
     forced: Option<Scheme>,
     root: Box<dyn Widget>,
     text: Text,
+    layout: Layout,
+    /// Everything must be laid out again (size, scale or theme changed)
+    needs_layout: bool,
     window: Option<Surface<OwnedDisplayHandle, Box<dyn Window>>>,
+    /// Context for frames rendered straight into the buffer
     render: Option<RenderContext>,
+    /// Context and pixmap for small regions
+    partial: Option<(RenderContext, Pixmap)>,
     res: Resources,
+    /// What changed since the last frame (logical)
+    damage: Option<Rect>,
+    full_damage: bool,
+    /// Damage of the last frames (pixels), newest last
+    history: VecDeque<Rect>,
+    buffer_size: (u16, u16),
+    /// Inks of the widgets that animated in the last frame
+    animating: Vec<Rect>,
     cursor: CursorIcon,
     stats: bool,
+    always_full: bool,
     /// Last pointer position (logical)
     pointer: Option<Point>,
     hovered: Option<WidgetId>,
@@ -115,14 +152,17 @@ impl Shell {
         }
     }
 
-    fn layout(&mut self) {
-        let bounds = Rect::from_origin_size(Point::ZERO, self.logical_size());
-        let mut cx = LayoutCx {
-            theme: &self.theme,
-            text: &mut self.text,
-            now: Instant::now(),
-        };
-        self.root.place(&mut cx, bounds);
+    fn add_damage(&mut self, r: Rect) {
+        if r.is_zero_area() {
+            return;
+        }
+        self.damage = Some(self.damage.map_or(r, |d| d.union(r)));
+    }
+
+    /// Everything changes: new size, scale or theme
+    fn invalidate_all(&mut self) {
+        self.needs_layout = true;
+        self.full_damage = true;
     }
 
     /// Sends `event` to the widget `id`; false if it no longer exists
@@ -140,13 +180,60 @@ impl Shell {
         }
     }
 
-    /// After input: state may have changed anywhere (signals), so lay out,
-    /// update the cursor and the accessibility tree, and draw
+    /// Collects what the widgets report as changed; returns the ids needing layout
+    fn collect_updates(&mut self) -> Vec<WidgetId> {
+        let (mut relayout, mut repaint) = (Vec::new(), Vec::new());
+        let mut cx = LayoutCx {
+            theme: &self.theme,
+            text: &mut self.text,
+            now: Instant::now(),
+        };
+        widget::update_all(self.root.as_mut(), &mut cx, &mut relayout, &mut repaint);
+        for r in repaint {
+            self.add_damage(r);
+        }
+        relayout
+    }
+
+    /// Lays out again; whatever moved or resized is damaged where it was and where it is
+    fn relayout(&mut self, dirty: &[WidgetId]) {
+        let (mut before, mut after) = (HashMap::new(), HashMap::new());
+        widget::inks(self.root.as_ref(), &mut before);
+        let size = self.logical_size();
+        let mut cx = LayoutCx {
+            theme: &self.theme,
+            text: &mut self.text,
+            now: Instant::now(),
+        };
+        self.layout.run(self.root.as_mut(), &mut cx, size, dirty);
+        widget::inks(self.root.as_ref(), &mut after);
+        for (id, ink) in &after {
+            let old = before.remove(id);
+            if old != Some(*ink) {
+                self.add_damage(*ink);
+                if let Some(old) = old {
+                    self.add_damage(old);
+                }
+            }
+        }
+        for gone in before.into_values() {
+            self.add_damage(gone);
+        }
+        self.needs_layout = false;
+    }
+
+    /// After input or a size change: pick up changes (signals, widget state),
+    /// lay out if needed, update hover, cursor and the accessibility tree,
+    /// and ask for a frame if anything needs drawing
     fn changed(&mut self) {
-        self.layout();
+        let dirty = self.collect_updates();
+        if self.needs_layout || !dirty.is_empty() {
+            self.relayout(&dirty);
+        }
         if let Some(p) = self.pointer {
             // the widget under a resting pointer can change with layout
             self.update_hover(p);
+            self.collect_updates();
         }
         let cursor = self
             .hovered
@@ -159,7 +246,9 @@ impl Shell {
             s.window().set_cursor(Cursor::Icon(cursor));
         }
         self.update_accessibility();
-        self.request_redraw();
+        if self.damage.is_some() || self.full_damage {
+            self.request_redraw();
+        }
     }
 
     fn set_focus(&mut self, id: Option<WidgetId>, visible: bool) {
@@ -357,12 +446,24 @@ impl Shell {
         });
         if scheme != self.theme.scheme {
             self.theme = Theme::new(scheme, &self.options.appearance);
-            self.layout();
+            self.invalidate_all();
         }
     }
 
     fn redraw(&mut self) {
         let start = Instant::now();
+        let now = Instant::now();
+        // animating widgets need their ink redrawn – and those that animated
+        // last frame once more, so a transition that just ended shows its end
+        let mut animating = Vec::new();
+        widget::animating_inks(self.root.as_ref(), now, &self.theme, &mut animating);
+        for r in std::mem::replace(&mut self.animating, animating.clone()) {
+            self.add_damage(r);
+        }
+        for &r in &animating {
+            self.add_damage(r);
+        }
+
         let scale = self.scale();
         let Some(surface) = self.window.as_mut() else {
             return;
@@ -376,47 +477,125 @@ impl Shell {
             u16::try_from(px.height).unwrap_or(u16::MAX),
         );
         surface.resize(w, h).expect("resizing the surface");
+        let whole = Rect::new(0.0, 0.0, f64::from(w16), f64::from(h16));
+        if self.buffer_size != (w16, h16) {
+            // the buffers were resized: earlier damage means nothing any more
+            self.buffer_size = (w16, h16);
+            self.history.clear();
+            self.full_damage = true;
+        }
 
-        let ctx = match &mut self.render {
-            Some(ctx) if ctx.width() == w16 && ctx.height() == h16 => ctx,
-            slot => slot.insert(RenderContext::new(w16, h16)),
+        // this frame's damage in pixels: outward to whole pixels, plus one for antialiasing
+        let frame = if self.full_damage || self.always_full {
+            Some(whole)
+        } else {
+            self.damage.map(|d| {
+                let d = d.scale_from_origin(scale).inflate(1.0, 1.0);
+                Rect::new(d.x0.floor(), d.y0.floor(), d.x1.ceil(), d.y1.ceil()).intersect(whole)
+            })
         };
-        ctx.reset();
-        ctx.set_transform(Affine::scale(scale));
-        ctx.set_paint(self.theme.bg);
-        ctx.fill_rect(&Rect::from_origin_size(
-            Point::ZERO,
-            Size::new(f64::from(w16), f64::from(h16)) / scale,
-        ));
-        let now = Instant::now();
-        self.root.paint(&mut PaintCx {
-            ctx,
-            res: &mut self.res,
-            theme: &self.theme,
-            now,
-        });
-        ctx.flush();
+        self.damage = None;
+        self.full_damage = false;
+        let Some(frame) = frame.filter(|f| f.area() > 0.0) else {
+            if !animating.is_empty() || !self.animating.is_empty() {
+                surface.window().request_redraw();
+            }
+            return;
+        };
 
         surface.window().pre_present_notify();
         let mut buffer = surface.buffer_mut().expect("softbuffer buffer");
-        let bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut buffer[..]);
-        let len = usize::from(w16) * usize::from(h16) * 4;
-        let target = vello_cpu::PixmapMut::new(w16, h16, &mut bytes[..len]).expect("buffer size");
-        ctx.render(target, &mut self.res);
-        for px in bytes[..len].as_chunks_mut::<4>().0 {
-            px.swap(0, 2);
+        // the buffer still shows the frame from `age` presents ago: redraw what changed since
+        let age = usize::from(buffer.age());
+        let region = if age == 0 || age - 1 > self.history.len() {
+            whole
+        } else {
+            self.history
+                .iter()
+                .rev()
+                .take(age - 1)
+                .fold(frame, |r, h| r.union(*h))
+                .intersect(whole)
+        };
+        self.history.push_back(frame);
+        while self.history.len() > HISTORY {
+            self.history.pop_front();
         }
-        buffer.present().expect("presenting");
+
+        let partial = region.area() <= whole.area() * PARTIAL_MAX;
+        let logical_region = region.scale_from_origin(1.0 / scale);
+        let theme = &self.theme;
+        let paint =
+            |ctx: &mut RenderContext, res: &mut Resources, root: &dyn Widget, offset: Point| {
+                ctx.reset();
+                ctx.set_transform(Affine::translate(-offset.to_vec2()) * Affine::scale(scale));
+                ctx.set_paint(theme.bg);
+                ctx.fill_rect(&logical_region);
+                root.paint(&mut PaintCx {
+                    ctx,
+                    res,
+                    theme,
+                    now,
+                    clip: logical_region,
+                });
+                ctx.flush();
+            };
+        if partial {
+            let (rw, rh) = (region.width() as u16, region.height() as u16);
+            let (ctx, pixmap) = self
+                .partial
+                .get_or_insert_with(|| (RenderContext::new(rw, rh), Pixmap::new(rw, rh)));
+            if ctx.width() != rw || ctx.height() != rh {
+                ctx.reset_and_resize(rw, rh);
+                pixmap.resize(rw, rh);
+            }
+            paint(ctx, &mut self.res, self.root.as_ref(), region.origin());
+            ctx.render(&mut *pixmap, &mut self.res);
+            // copy into the buffer: RGBA bytes → 0RGB words
+            let src = pixmap.data_as_u8_slice();
+            let (x0, y0, stride) = (region.x0 as usize, region.y0 as usize, usize::from(w16));
+            for (row, line) in src.chunks_exact(usize::from(rw) * 4).enumerate() {
+                let dst = &mut buffer[(y0 + row) * stride + x0..][..usize::from(rw)];
+                for (out, px) in dst.iter_mut().zip(line.as_chunks::<4>().0) {
+                    *out = u32::from(px[0]) << 16 | u32::from(px[1]) << 8 | u32::from(px[2]);
+                }
+            }
+        } else {
+            let ctx = match &mut self.render {
+                Some(ctx) if ctx.width() == w16 && ctx.height() == h16 => ctx,
+                slot => slot.insert(RenderContext::new(w16, h16)),
+            };
+            paint(ctx, &mut self.res, self.root.as_ref(), Point::ZERO);
+            let bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut buffer[..]);
+            let len = usize::from(w16) * usize::from(h16) * 4;
+            let target =
+                vello_cpu::PixmapMut::new(w16, h16, &mut bytes[..len]).expect("buffer size");
+            ctx.render(target, &mut self.res);
+            for px in bytes[..len].as_chunks_mut::<4>().0 {
+                px.swap(0, 2);
+            }
+        }
+        let damage = softbuffer::Rect {
+            x: frame.x0 as u32,
+            y: frame.y0 as u32,
+            width: NonZeroU32::new(frame.width() as u32).expect("non-empty"),
+            height: NonZeroU32::new(frame.height() as u32).expect("non-empty"),
+        };
+        buffer.present_with_damage(&[damage]).expect("presenting");
 
         if self.stats {
             eprintln!(
-                "frame {}x{} @{scale}: {:.2} ms",
+                "frame {}x{} @{scale}: {} {}x{} ({:.1} %, age {age}) {:.2} ms",
                 px.width,
                 px.height,
+                if partial { "partial" } else { "full" },
+                region.width(),
+                region.height(),
+                100.0 * region.area() / whole.area(),
                 start.elapsed().as_secs_f64() * 1e3
             );
         }
-        if widget::any_animating(self.root.as_ref(), Instant::now(), &self.theme) {
+        if !animating.is_empty() || !self.animating.is_empty() {
             surface.window().request_redraw();
         }
     }
@@ -446,6 +625,7 @@ impl ApplicationHandler for Shell {
         self.window = Some(Surface::new(&context, window).expect("softbuffer surface"));
         self.a11y = Some(Accessibility::new(event_loop.create_proxy()));
         self.set_scheme(theme);
+        self.invalidate_all();
         self.changed();
     }
 
@@ -468,11 +648,12 @@ impl ApplicationHandler for Shell {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::SurfaceResized(_) | WindowEvent::ScaleFactorChanged { .. } => {
-                self.changed()
+                self.invalidate_all();
+                self.changed();
             }
             WindowEvent::ThemeChanged(theme) => {
                 self.set_scheme(Some(theme));
-                self.request_redraw();
+                self.changed();
             }
             WindowEvent::Focused(focused) => {
                 if let Some(a11y) = &mut self.a11y {

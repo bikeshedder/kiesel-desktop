@@ -73,13 +73,15 @@ impl Transition {
         }
     }
 
-    pub fn set(&mut self, to: f64, now: Instant, duration: f64) {
+    /// Returns true if the target changed (a transition starts)
+    pub fn set(&mut self, to: f64, now: Instant, duration: f64) -> bool {
         if to == self.to {
-            return;
+            return false;
         }
         self.from = self.value(now, duration);
         self.to = to;
         self.start = Some(now);
+        true
     }
 
     pub fn value(&self, now: Instant, duration: f64) -> f64 {
