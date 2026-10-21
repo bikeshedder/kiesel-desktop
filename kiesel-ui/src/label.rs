@@ -2,15 +2,21 @@
 //! word boundaries to whatever width layout gives it.
 
 use parley::Layout;
+use reactive_graph::traits::{Track, WithUntracked};
+use reactive_graph::wrappers::read::ArcSignal;
 use vello_cpu::kurbo::{Rect, Size};
 
+use crate::reactive::{MountCx, Watch};
 use crate::text::{self, wrap};
 use crate::theme::TextRole;
-use crate::widget::{Available, Known, LayoutCx, PaintCx, Widget, WidgetId};
+use crate::widget::{Available, Change, Known, LayoutCx, PaintCx, Widget, WidgetId};
 
 pub struct Label {
     id: WidgetId,
-    text: String,
+    text: ArcSignal<String>,
+    watch: Option<Watch>,
+    /// The text as of the last update – what is shaped and on screen
+    shown: String,
     role: TextRole,
     /// Shaped once; broken into lines again only when the width changes
     layout: Option<Layout<()>>,
@@ -20,9 +26,17 @@ pub struct Label {
 
 impl Label {
     pub fn new(text: impl Into<String>) -> Self {
+        Self::bound(ArcSignal::stored(text.into()))
+    }
+
+    /// Text that follows a signal (or `ArcSignal::derive(…)`)
+    pub fn bound(text: impl Into<ArcSignal<String>>) -> Self {
+        let text = text.into();
         Self {
             id: WidgetId::next(),
-            text: text.into(),
+            shown: text.with_untracked(String::clone),
+            watch: None,
+            text,
             role: TextRole::Body,
             layout: None,
             broken_at: None,
@@ -46,7 +60,7 @@ impl Label {
     fn layout(&mut self, cx: &mut LayoutCx<'_>) -> &mut Layout<()> {
         let style = cx.theme.text_style(self.role);
         self.layout
-            .get_or_insert_with(|| cx.text.paragraph(&self.text, &style))
+            .get_or_insert_with(|| cx.text.paragraph(&self.shown, &style))
     }
 
     /// Breaks the text at `width` unless it already is
@@ -65,6 +79,22 @@ impl Label {
 impl Widget for Label {
     fn id(&self) -> WidgetId {
         self.id
+    }
+
+    fn mount(&mut self, cx: &mut MountCx<'_>) {
+        let text = self.text.clone();
+        self.watch = Some(cx.watch(self.id, move || text.track()));
+    }
+
+    /// New text: shape again, and its size may change
+    fn update(&mut self, _cx: &mut LayoutCx<'_>) -> Change {
+        if self.text.with_untracked(|t| *t == self.shown) {
+            return Change::NONE;
+        }
+        self.shown = self.text.with_untracked(String::clone);
+        self.layout = None;
+        self.broken_at = None;
+        Change::LAYOUT
     }
 
     fn measure(&mut self, cx: &mut LayoutCx<'_>, known: Known, available: Available) -> Size {
@@ -107,7 +137,7 @@ impl Widget for Label {
 
     fn accessibility(&self) -> Option<accesskit::Node> {
         let mut node = accesskit::Node::new(accesskit::Role::Label);
-        node.set_value(self.text.clone());
+        node.set_value(self.shown.clone());
         node.set_bounds(crate::widget::accessible_rect(self.bounds));
         Some(node)
     }

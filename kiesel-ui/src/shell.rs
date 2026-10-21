@@ -1,6 +1,10 @@
 //! The window shell: winit window, softbuffer surface, vello_cpu rendering,
 //! layout, input routing, focus and accessibility.
 //!
+//! State reaches the widgets through signals (see [`crate::reactive`]): a change
+//! queues the widgets that show it, and only those – and widgets that got
+//! events – are asked what changed ([`Widget::update`]).
+//!
 //! Frames are drawn on demand and only where something changed. Widgets report
 //! changes from [`Widget::update`] (and layout moves them); the shell collects
 //! their inks into a damage rectangle and redraws just that: a small region is
@@ -19,6 +23,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroU32;
+use std::sync::Arc;
 use std::time::Instant;
 
 use softbuffer::{Context, Surface};
@@ -33,6 +38,7 @@ use winit::window::{Theme as WinitTheme, Window, WindowAttributes, WindowId};
 
 use crate::a11y::Accessibility;
 use crate::layout::Layout;
+use crate::reactive::{Inbox, MountCx};
 use crate::text::Text;
 use crate::theme::{Appearance, Scheme, Theme};
 use crate::widget::{
@@ -55,6 +61,10 @@ pub fn run(
     root: impl Widget + 'static,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
+    let proxy = event_loop.create_proxy();
+    let inbox = Inbox::new(move || proxy.wake_up());
+    let mut root: Box<dyn Widget> = Box::new(root);
+    widget::mount_all(root.as_mut(), &mut MountCx { inbox: &inbox });
     // KIESEL_THEME=light|dark overrides the system preference (tests, screenshots)
     let forced = match std::env::var("KIESEL_THEME").as_deref() {
         Ok("dark") => Some(Scheme::Dark),
@@ -66,7 +76,10 @@ pub fn run(
         theme: Theme::new(scheme, &options.appearance),
         forced,
         options,
-        root: Box::new(root),
+        root,
+        inbox,
+        touched: Vec::new(),
+        update_everything: true,
         text: Text::default(),
         layout: Layout::default(),
         needs_layout: true,
@@ -100,6 +113,11 @@ struct Shell {
     theme: Theme,
     forced: Option<Scheme>,
     root: Box<dyn Widget>,
+    inbox: Arc<Inbox>,
+    /// Widgets that got events since the last update
+    touched: Vec<WidgetId>,
+    /// Ask every widget, not just the touched and queued ones (start, theme change)
+    update_everything: bool,
     text: Text,
     layout: Layout,
     /// Everything must be laid out again (size, scale or theme changed)
@@ -163,6 +181,7 @@ impl Shell {
     fn invalidate_all(&mut self) {
         self.needs_layout = true;
         self.full_damage = true;
+        self.update_everything = true;
     }
 
     /// Sends `event` to the widget `id`; false if it no longer exists
@@ -174,13 +193,17 @@ impl Shell {
         match widget::find_mut(self.root.as_mut(), id) {
             Some(w) => {
                 w.event(&mut cx, &event);
+                if !self.touched.contains(&id) {
+                    self.touched.push(id);
+                }
                 true
             }
             None => false,
         }
     }
 
-    /// Collects what the widgets report as changed; returns the ids needing layout
+    /// Asks the widgets that got events or whose signals changed what changed;
+    /// returns the ids needing layout
     fn collect_updates(&mut self) -> Vec<WidgetId> {
         let (mut relayout, mut repaint) = (Vec::new(), Vec::new());
         let mut cx = LayoutCx {
@@ -188,7 +211,24 @@ impl Shell {
             text: &mut self.text,
             now: Instant::now(),
         };
-        widget::update_all(self.root.as_mut(), &mut cx, &mut relayout, &mut repaint);
+        let mut ids = std::mem::take(&mut self.touched);
+        ids.extend(self.inbox.take());
+        if std::mem::take(&mut self.update_everything) {
+            widget::update_all(self.root.as_mut(), &mut cx, &mut relayout, &mut repaint);
+        } else {
+            for id in ids {
+                let Some(w) = widget::find_mut(self.root.as_mut(), id) else {
+                    continue;
+                };
+                let change = w.update(&mut cx);
+                if change.layout {
+                    relayout.push(id);
+                }
+                if change.paint {
+                    repaint.push(w.ink());
+                }
+            }
+        }
         for r in repaint {
             self.add_damage(r);
         }
@@ -638,8 +678,8 @@ impl ApplicationHandler for Shell {
         for request in requests {
             self.accessibility_action(request);
         }
-        // a first request for the tree is answered here as well
-        self.update_accessibility();
+        // signals changed (perhaps on another thread)
+        self.changed();
     }
 
     fn window_event(&mut self, event_loop: &dyn ActiveEventLoop, _: WindowId, event: WindowEvent) {

@@ -8,8 +8,8 @@
 use std::time::Instant;
 
 use parley::Layout;
-use reactive_graph::signal::ArcRwSignal;
-use reactive_graph::traits::GetUntracked;
+use reactive_graph::traits::{GetUntracked, Track};
+use reactive_graph::wrappers::read::ArcSignal;
 use vello_cpu::RenderContext;
 use vello_cpu::kurbo::{Affine, Arc, Cap, Point, Rect, RoundedRect, Shape, Size, Stroke, Vec2};
 use vello_cpu::peniko::Gradient;
@@ -18,6 +18,7 @@ use winit::keyboard::{Key, NamedKey};
 
 use crate::anim::Transition;
 use crate::paint::{self, TOLERANCE};
+use crate::reactive::{MountCx, Watch};
 use crate::text;
 use crate::theme::{Color, Theme, mix};
 use crate::widget::{
@@ -36,8 +37,9 @@ pub struct Button {
     layout: Option<Layout<()>>,
     bounds: Rect,
     radius: f64,
-    loading: ArcRwSignal<bool>,
-    /// `loading` as of the last layout – what is on screen
+    loading: ArcSignal<bool>,
+    watch: Option<Watch>,
+    /// `loading` as of the last update – what is on screen
     shown_loading: bool,
     spin_start: Instant,
     on_click: Option<Box<dyn FnMut()>>,
@@ -63,7 +65,8 @@ impl Button {
             layout: None,
             bounds: Rect::ZERO,
             radius: 0.0,
-            loading: ArcRwSignal::new(false),
+            loading: ArcSignal::stored(false),
+            watch: None,
             shown_loading: false,
             spin_start: Instant::now(),
             on_click: None,
@@ -80,8 +83,9 @@ impl Button {
     }
 
     /// Busy: a spinner before the label; the label stays
-    pub fn loading(mut self, loading: ArcRwSignal<bool>) -> Self {
-        self.loading = loading;
+    /// A value, a signal, or `ArcSignal::derive(…)`
+    pub fn loading(mut self, loading: impl Into<ArcSignal<bool>>) -> Self {
+        self.loading = loading.into();
         self
     }
 
@@ -119,6 +123,11 @@ impl Button {
 impl Widget for Button {
     fn id(&self) -> WidgetId {
         self.id
+    }
+
+    fn mount(&mut self, cx: &mut MountCx<'_>) {
+        let loading = self.loading.clone();
+        self.watch = Some(cx.watch(self.id, move || loading.track()));
     }
 
     /// Picks up `loading` (it changes the width) and repaints after events

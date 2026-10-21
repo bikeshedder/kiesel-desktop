@@ -13,6 +13,7 @@ use vello_cpu::{RenderContext, Resources};
 use winit::cursor::CursorIcon;
 use winit::keyboard::Key;
 
+use crate::reactive::MountCx;
 use crate::text::Text;
 use crate::theme::Theme;
 
@@ -169,7 +170,11 @@ pub trait Widget {
         self.bounds()
     }
 
-    /// Called before every layout: picks up signals and state changed by events
+    /// Once, before the first layout: watch the signals it shows (see [`MountCx::watch`])
+    fn mount(&mut self, _cx: &mut MountCx<'_>) {}
+
+    /// Called when a watched signal changed or the widget got an event (and once
+    /// at the start): read signals untracked, report what changed
     fn update(&mut self, _cx: &mut LayoutCx<'_>) -> Change {
         Change::NONE
     }
@@ -307,6 +312,13 @@ pub(crate) fn update_all(
     }
     for child in w.children_mut() {
         update_all(child.as_mut(), cx, relayout, repaint);
+    }
+}
+
+pub(crate) fn mount_all(w: &mut dyn Widget, cx: &mut MountCx<'_>) {
+    w.mount(cx);
+    for child in w.children_mut() {
+        mount_all(child.as_mut(), cx);
     }
 }
 

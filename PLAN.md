@@ -79,6 +79,10 @@ pointer and keyboard for the whole session. Open: no IME and no portal (file dia
    redraws only the damaged region (rendered into its own pixmap and copied, or straight into the buffer above
    half the window), merged with the damage since the buffer was last shown (softbuffer's buffer age), and presents
    it with damage. Example: `cargo run --example dialog`.
-4. Port components following kiesel's ROADMAP order. Before many more widgets: reactive updates instead of
-   polling every widget in `update()` (effects on the signals), and text input with IME (the headless session
-   needs an input method for that).
+4. **Reactive state, text input**
+   - ✅ a) Signals reach exactly the widgets that show them: widgets `watch` their `ArcSignal` props on mount
+     (reactive_graph's immediate effects, no executor); a change on any thread queues the widget and wakes the
+     event loop, and only queued widgets and those that got events are updated. `Label::bound` follows a
+     signal. The dialog demo saves on a background thread.
+   - b) `TextField` with editing, selection, clipboard and IME; the headless session gets an input method.
+5. Port components following kiesel's ROADMAP order.

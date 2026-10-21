@@ -8,6 +8,7 @@ pub mod flex;
 pub mod label;
 mod layout;
 pub mod paint;
+pub mod reactive;
 pub mod shell;
 pub mod text;
 pub mod theme;
@@ -21,6 +22,8 @@ pub use shell::{Options, run};
 pub use theme::{Appearance, Scheme, TextRole, Theme, space};
 pub use widget::{Change, Event, Widget, WidgetId};
 
+pub use reactive::{MountCx, Watch};
 pub use reactive_graph::signal::ArcRwSignal;
-pub use reactive_graph::traits::{GetUntracked, Set, Update};
+pub use reactive_graph::traits::{Get, GetUntracked, Set, Track, Update, With, WithUntracked};
+pub use reactive_graph::wrappers::read::ArcSignal;
 pub use vello_cpu::kurbo;

@@ -3,6 +3,8 @@
 #   layout   – the paragraph wraps to more lines in a narrow window, the
 #              buttons stay on the card's right; all of it found through AT-SPI
 #   redraw   – while the spinner turns, frames redraw a small region only
+#   signals  – the save runs on a background thread; when it ends, the button
+#              stops loading and the caption changes (signals set off the UI thread)
 #   pixels   – partial redraws end up identical (±2 per channel) to redrawing
 #              everything (KIESEL_FULL_REDRAW=1) after the same interactions
 # Screenshots and logs land in shots/dialog-demo/.
@@ -73,7 +75,10 @@ if partial < 0.9 * len(frames) or sorted(share)[len(share) // 2] > 15:
     sys.exit(f"FAIL: {sys.argv[2]}: {partial}/{len(frames)} partial, median {sorted(share)[len(share) // 2]} % of the window")
 print(f"     {sys.argv[2]}: {partial}/{len(frames)} frames partial, median {sorted(share)[len(share) // 2]:.1f} % of the window")
 EOF
-  $H click $($H a11y where "Save changes"); settle
+  # the save thread ends after 2 s
+  sleep 1
+  [[ "$($H a11y | grep -c "button 'Save changes' busy")" == 0 ]] || fail "$tag: still busy after the save"
+  $H a11y | grep -q "label 'Saved just now'" || fail "$tag: the caption did not follow the save"
 
   # pixels: partial redraws vs. full redraws after the same interactions
   launch "$scale" "$OUT/$tag-partial.log"; interact; $H shot "$OUT/$tag-partial.png"
