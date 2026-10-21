@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# kiesel-headless – a private headless Wayland session for tests and screenshots.
+#
+#   kiesel-headless start [--size 1280x800] [--scale 1]   start sway + D-Bus + AT-SPI
+#   kiesel-headless run <cmd> [args…]                     run a command inside the session
+#   kiesel-headless env                                   print exports (eval "$(kiesel-headless env)")
+#   kiesel-headless shot [file.png]                       screenshot of the whole output
+#   kiesel-headless click <x> <y> [left|right|middle]     move the pointer to logical x,y and click
+#   kiesel-headless key <wtype args…>                     type text / keys (e.g. -k Return)
+#   kiesel-headless a11y                                  dump the AT-SPI tree of running apps
+#   kiesel-headless stop
+#
+# Software rendering only: sway uses the pixman renderer, clients get Mesa's
+# lavapipe (Vulkan) and llvmpipe (GL). The VS Code container sets WAYLAND_DISPLAY
+# and DISPLAY to the editor's own forwarded sockets; everything here overrides
+# them so tests never draw on the host.
+set -euo pipefail
+
+RUN_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}"
+STATE="$RUN_DIR/kiesel-headless"
+OUTPUT=HEADLESS-1
+
+die() { echo "kiesel-headless: $*" >&2; exit 1; }
+running() { [[ -f "$STATE/env" ]] && kill -0 "$(cat "$STATE/sway.pid" 2>/dev/null)" 2>/dev/null; }
+need() { running || die "no session – run 'kiesel-headless start' first"; }
+load() { need; set -a; source "$STATE/env"; set +a; unset DISPLAY; }
+
+start() {
+  local size=1280x800 scale=1
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --size) size="$2"; shift 2 ;;
+      --scale) scale="$2"; shift 2 ;;
+      *) die "unknown option $1" ;;
+    esac
+  done
+  running && die "already running (kiesel-headless stop first)"
+  mkdir -p -m 700 "$RUN_DIR" "$STATE"
+  rm -f "$STATE"/*
+
+  # D-Bus session bus, with the AT-SPI bus switched on (AccessKit only exposes
+  # its tree when org.a11y.Status says assistive technology is active)
+  dbus-daemon --session --fork --address="unix:path=$STATE/bus" --print-pid >"$STATE/dbus.pid"
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=$STATE/bus"
+  /usr/libexec/at-spi-bus-launcher --launch-immediately >"$STATE/atspi.log" 2>&1 &
+  echo $! >"$STATE/atspi.pid"
+  for _ in $(seq 50); do
+    gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus \
+      --method org.freedesktop.DBus.Properties.Set org.a11y.Status IsEnabled '<true>' >/dev/null 2>&1 && break
+    sleep 0.1
+  done
+
+  # Plain sway: no bar, no borders, one fullscreen-ish tiled window; Xwayland
+  # off so nothing can silently fall back to X11
+  # --size is logical; the output's mode is in pixels (1280x800 @ 2 → 2560x1600)
+  local w h
+  w=$(awk -v v="${size%x*}" -v s="$scale" 'BEGIN { printf "%d", v * s + 0.5 }')
+  h=$(awk -v v="${size#*x}" -v s="$scale" 'BEGIN { printf "%d", v * s + 0.5 }')
+  cat >"$STATE/sway.conf" <<EOF
+xwayland disable
+default_border none
+default_floating_border none
+focus_follows_mouse no
+output $OUTPUT resolution ${w}x${h} position 0 0 scale $scale bg #e4e8ee solid_color
+seat * hide_cursor 0
+exec sh -c 'printf "WAYLAND_DISPLAY=%s\nSWAYSOCK=%s\n" "\$WAYLAND_DISPLAY" "\$SWAYSOCK" > "$STATE/sway.env"'
+EOF
+  env -u WAYLAND_DISPLAY -u DISPLAY \
+    XDG_RUNTIME_DIR="$RUN_DIR" WLR_BACKENDS=headless WLR_RENDERER=pixman \
+    WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1 \
+    sway -c "$STATE/sway.conf" >"$STATE/sway.log" 2>&1 &
+  echo $! >"$STATE/sway.pid"
+  for _ in $(seq 100); do [[ -s "$STATE/sway.env" ]] && break; sleep 0.1; done
+  [[ -s "$STATE/sway.env" ]] || { cat "$STATE/sway.log" >&2; stop; die "sway did not come up"; }
+
+  {
+    echo "XDG_RUNTIME_DIR=$RUN_DIR"
+    cat "$STATE/sway.env"
+    echo "DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
+    echo "KIESEL_HEADLESS_SCALE=$scale"
+    echo "WINIT_UNIX_BACKEND=wayland"
+    echo "XDG_SESSION_TYPE=wayland"
+  } >"$STATE/env"
+  echo "headless session up: $size @ scale $scale = ${w}x${h} px ($(grep WAYLAND_DISPLAY "$STATE/sway.env"))"
+}
+
+stop() {
+  for p in sway atspi dbus; do
+    [[ -f "$STATE/$p.pid" ]] && kill "$(cat "$STATE/$p.pid")" 2>/dev/null || true
+  done
+  rm -f "$STATE"/*.pid "$STATE/env" "$STATE/sway.env"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  start) start "$@" ;;
+  stop) stop ;;
+  env) need; sed 's/^/export /' "$STATE/env"; echo "unset DISPLAY" ;;
+  run) load; exec "$@" ;;
+  shot) load; exec grim -o "$OUTPUT" "${1:-shot.png}" ;;
+  key) load; exec wtype "$@" ;;
+  click)
+    load
+    [[ $# -ge 2 ]] || die "click <x> <y> [button]"
+    # wlrctl moves relatively: park the pointer in the top-left corner first
+    wlrctl pointer move -100000 -100000
+    wlrctl pointer move "$1" "$2"
+    wlrctl pointer click "${3:-left}"
+    ;;
+  a11y)
+    load
+    exec python3 - <<'EOF'
+import pyatspi
+def walk(acc, depth=0):
+    try:
+        states = [pyatspi.stateToString(s) for s in acc.getState().getStates()
+                  if s in (pyatspi.STATE_FOCUSED, pyatspi.STATE_BUSY, pyatspi.STATE_PRESSED, pyatspi.STATE_CHECKED)]
+        print(f"{'  ' * depth}{acc.getRoleName()} {acc.name!r} {' '.join(states)}".rstrip())
+        for child in acc:
+            walk(child, depth + 1)
+    except Exception as e:
+        print(f"{'  ' * depth}<{e}>")
+walk(pyatspi.Registry.getDesktop(0))
+EOF
+    ;;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
+esac

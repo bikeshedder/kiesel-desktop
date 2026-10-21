@@ -1,0 +1,62 @@
+# cargo-deny config for the Kiesel native toolkit (library: MIT OR Apache-2.0).
+# Policy: permissive only. No GPL/LGPL/AGPL, no MPL (file-level copyleft), no SSPL/BUSL/commercial.
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+all-features = false
+
+[licenses]
+confidence-threshold = 0.93
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception", # rustix, linux-raw-sys, wasm tooling
+    "BSD-2-Clause",                   # arrayref
+    "BSD-3-Clause",                   # tiny-skia, accesskit (repo), moxcms/pxfm
+    "ISC",                            # libloading
+    "Zlib",                           # foldhash, slotmap, zlib-rs, bytemuck
+    "BSL-1.0",                        # clipboard-win, error-code (Windows, via arboard)
+    "Unicode-3.0",                    # ICU4X data (parley segmentation), unicode-ident
+    "0BSD",
+    "CC0-1.0",                        # hexf-parse (naga in older wgpu)
+    "Unlicense",                      # only ever as "Unlicense OR MIT"; MIT is taken
+]
+# Everything not listed is denied, so GPL-*, LGPL-*, AGPL-*, MPL-2.0, EPL-*, CDDL, SSPL,
+# BUSL and LicenseRef-* (e.g. Slint's royalty-free/commercial terms) fail the check.
+
+# Fonts are data, not code; OFL is only acceptable for fonts we bundle explicitly.
+# exceptions = [{ crate = "kiesel-fonts", allow = ["OFL-1.1"] }]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+deny = [
+    # GTK stack (LGPL system libs) – keep native menus/dialogs GTK-free on Linux.
+    { crate = "gtk", reason = "LGPL system dependency; use xdg-desktop-portal" },
+    { crate = "gtk4", reason = "LGPL system dependency" },
+    { crate = "gtk-sys", reason = "LGPL system dependency" },
+    { crate = "gtk4-sys", reason = "LGPL system dependency" },
+    { crate = "webkit2gtk", reason = "no WebView" },
+    { crate = "wry", reason = "no WebView" },
+    # Slint: study only, never link.
+    { crate = "slint", reason = "GPL-3.0 / commercial" },
+    { crate = "i-slint-core", reason = "GPL-3.0 / commercial" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = []
+
+[advisories]
+yanked = "deny"

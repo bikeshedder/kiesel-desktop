@@ -1,0 +1,7 @@
+/target/
+**/target/
+# The SolidJS original – its own repository, checked out here for reference
+/kiesel/
+# kiesel-headless screenshots and other test output
+*.png
+!/docs/**/*.png

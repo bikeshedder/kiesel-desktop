@@ -1,0 +1,38 @@
+// For format details, see https://aka.ms/devcontainer.json.
+{
+	"name": "Kiesel Desktop",
+	// Rust on Debian trixie + headless Wayland (sway), software Vulkan/GL (Mesa),
+	// AT-SPI and memory tools – see Dockerfile and `kiesel-headless`.
+	"build": { "dockerfile": "Dockerfile", "context": "." },
+	"remoteUser": "vscode",
+
+	"mounts": [
+		// Persist Claude Code config, credentials and history across container rebuilds.
+		{
+			"source": "devcontainer-claude-${devcontainerId}",
+			"target": "/home/vscode/.claude",
+			"type": "volume"
+		},
+		// Downloaded crates survive rebuilds (target/ stays in the workspace).
+		{
+			"source": "devcontainer-cargo-registry-${devcontainerId}",
+			"target": "/usr/local/cargo/registry",
+			"type": "volume"
+		}
+	],
+	"containerEnv": {
+		"CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+		"LANG": "C.UTF-8",
+		"XDG_RUNTIME_DIR": "/tmp/runtime-vscode"
+	},
+	// Fresh volumes are root-owned; hand them to the container user.
+	"postCreateCommand": "sudo chown vscode:vscode /home/vscode/.claude && sudo chown -R vscode:rustlang /usr/local/cargo/registry && fc-cache -f >/dev/null",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"Anthropic.claude-code",
+				"rust-lang.rust-analyzer"
+			]
+		}
+	}
+}
