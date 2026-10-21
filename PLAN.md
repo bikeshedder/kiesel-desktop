@@ -36,6 +36,13 @@ Goal: far less memory than a WebView. No browser, no JS, no Tauri.
 
 A change of scheme cross-fades the whole window for 300 ms (about 18 full frames), then nothing.
 
+Full-window frames (release, measured headless; `KIESEL_STATS` breaks a frame into wait, paint, raster, copy,
+present): 2560×1600 ~4 ms, 3840×2160 ~13 ms – scene 0.6 ms, rasterizing ~9 ms, conversion into the window's
+pixel format ~3 ms. That fits 60 Hz, not 120 Hz: two passes over every pixel are the floor of a CPU renderer,
+and vello_cpu's worker threads saved ~25 % for 8–16 extra threads. 120 Hz is for the GPU renderer
+([ROADMAP.md](ROADMAP.md) D5). Debug builds optimize dependencies (opt-level 3) and kiesel-ui (opt-level 1),
+or a full frame would take 170–360 ms.
+
 Estimates (not measured yet, needs real hardware): GPU path with wgpu on Mesa ~50–90 MB, on NVIDIA ~120–200 MB.
 Full CPU redraws took ~55 ms in the unoptimised probe (120 blurred cards) → damage regions and cached shadows are required for dense screens.
 The button demo redraws the full 1280×800 px window in ~1.4 ms (release, median). With damage tracking, the

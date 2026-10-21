@@ -15,6 +15,8 @@ The stack, measured baselines and the headless test setup are in [PLAN.md](PLAN.
 - **Porting:** look and states from Kiesel Web (tokens, CSS, ARIA). Where the web's behaviour is a browser
   convention, the desktop convention wins: focus, the context-menu key, Ctrl/Cmd, double-click timing, scrolling.
 - **Idle costs nothing:** no frames without a change; animations damage only what moves.
+- **Frame budget:** the software renderer targets **60 Hz** (16.7 ms per frame, full-window frames included, at
+  2560×1600 and 4K). 120 Hz is the GPU renderer's goal (D5), not the software renderer's.
 - **Sizes:** **S** an afternoon · **M** a day or two · **L** several days.
 
 ## Done
@@ -97,8 +99,10 @@ What most desktop apps need first, settings dialogs above all.
 - [ ] **L** Windows: AccessKit's Windows adapter (UIA), IME (TSF through winit), clipboard, theme events, DPI;
   CI builds and runs the unit tests.
 - [ ] **L** macOS: AccessKit's macOS adapter, menu bar, Cmd shortcuts, theme; CI.
-- [ ] **L** GPU rendering (vello_hybrid or an own wgpu SDF pipeline) behind the same painting code; measured on
-  real hardware against PLAN.md's CPU numbers, chosen per platform – memory first.
+- [ ] **L** GPU rendering (vello_hybrid or an own wgpu SDF pipeline) behind the same painting code – the path
+  to **120 Hz** and above, including full-window animations at 4K. Measured on real hardware (an RTX 5090
+  machine is available) against PLAN.md's CPU numbers, for frame time and memory; chosen per platform and
+  display, with the CPU renderer staying the low-memory default.
 - [ ] **M** Packaging an example app: Flatpak, MSI, `.app`.
 
 ## Not planned
