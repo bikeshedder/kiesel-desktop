@@ -210,7 +210,9 @@ impl Widget for Button {
                     self.activate();
                 }
             }
-            Event::KeyDown { key, repeat: false } if is_space(key) => self.key_armed = true,
+            Event::KeyDown {
+                key, repeat: false, ..
+            } if is_space(key) => self.key_armed = true,
             Event::KeyUp { key } if is_space(key) && self.key_armed => {
                 self.key_armed = false;
                 self.activate();
@@ -218,6 +220,7 @@ impl Widget for Button {
             Event::KeyDown {
                 key: Key::Named(NamedKey::Enter),
                 repeat: false,
+                ..
             } => self.activate(),
             Event::Focus { focused, visible } => {
                 self.focused = *focused;

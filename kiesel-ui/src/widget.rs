@@ -11,8 +11,9 @@ use std::time::Instant;
 use vello_cpu::kurbo::{Point, Rect, Size};
 use vello_cpu::{RenderContext, Resources};
 use winit::cursor::CursorIcon;
-use winit::keyboard::Key;
+use winit::keyboard::{Key, ModifiersState};
 
+use crate::clipboard::Clipboard;
 use crate::reactive::MountCx;
 use crate::text::Text;
 use crate::theme::Theme;
@@ -50,6 +51,8 @@ pub enum Event {
     KeyDown {
         key: Key,
         repeat: bool,
+        /// What the key types, if anything (layout, dead keys and compose applied)
+        text: Option<String>,
     },
     KeyUp {
         key: Key,
@@ -61,6 +64,27 @@ pub enum Event {
     },
     /// Assistive technology asks for the default action (a click)
     Activate,
+    /// Assistive technology sets the value (text fields)
+    SetValue(String),
+    /// Assistive technology moves the caret or selection (text fields)
+    SetTextSelection(accesskit::TextSelection),
+    /// Input method: composition in progress, its result, or text to remove
+    Ime(Ime),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ime {
+    /// Text being composed; `cursor` is a byte range in it. Empty: composition ended.
+    Preedit {
+        text: String,
+        cursor: Option<(usize, usize)>,
+    },
+    Commit(String),
+    /// Remove this many bytes before and after the caret
+    DeleteSurrounding {
+        before: usize,
+        after: usize,
+    },
 }
 
 pub struct LayoutCx<'a> {
@@ -92,6 +116,11 @@ impl PaintCx<'_> {
 pub struct EventCx<'a> {
     pub theme: &'a Theme,
     pub now: Instant,
+    pub text: &'a mut Text,
+    pub clipboard: &'a mut Clipboard,
+    pub modifiers: ModifiersState,
+    /// 1, 2, 3… for single, double, triple clicks (with `PointerDown`)
+    pub clicks: u8,
 }
 
 /// What changed since the last update – reported by [`Widget::update`]
@@ -191,6 +220,22 @@ pub trait Widget {
         false
     }
 
+    /// Takes text input: the shell turns the input method on while it is focused
+    fn accepts_text(&self) -> bool {
+        false
+    }
+
+    /// Where text is being entered (the caret or the composition), for the input
+    /// method's candidate window
+    fn ime_area(&self) -> Option<Rect> {
+        None
+    }
+
+    /// When it next needs a frame without any input (a caret blinking)
+    fn wake_at(&self, _now: Instant) -> Option<Instant> {
+        None
+    }
+
     fn event(&mut self, _cx: &mut EventCx<'_>, _event: &Event) {}
 
     fn cursor(&self) -> CursorIcon {
@@ -206,6 +251,11 @@ pub trait Widget {
     /// descendants then belong to the nearest exposed ancestor)
     fn accessibility(&self) -> Option<accesskit::Node> {
         None
+    }
+
+    /// Nodes of its own below its accessibility node (a text field's text runs)
+    fn accessibility_children(&self) -> Vec<(accesskit::NodeId, accesskit::Node)> {
+        Vec::new()
     }
 }
 
@@ -269,6 +319,10 @@ pub(crate) fn accessibility_nodes(
         .collect();
     match w.accessibility() {
         Some(mut node) => {
+            let own = w.accessibility_children();
+            let mut below = below;
+            below.extend(own.iter().map(|(id, _)| *id));
+            out.extend(own);
             node.set_children(below);
             out.push((w.id().node(), node));
             vec![w.id().node()]
@@ -312,6 +366,24 @@ pub(crate) fn update_all(
     }
     for child in w.children_mut() {
         update_all(child.as_mut(), cx, relayout, repaint);
+    }
+}
+
+/// The earliest [`Widget::wake_at`] in the tree, and the inks of the widgets that asked
+pub(crate) fn wakes(
+    w: &dyn Widget,
+    now: Instant,
+    next: &mut Option<Instant>,
+    inks: &mut Vec<Rect>,
+) {
+    if let Some(t) = w.wake_at(now) {
+        inks.push(w.ink());
+        if next.is_none_or(|n| t < n) {
+            *next = Some(t);
+        }
+    }
+    for child in w.children() {
+        wakes(child.as_ref(), now, next, inks);
     }
 }
 

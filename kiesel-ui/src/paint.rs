@@ -49,7 +49,7 @@ pub fn outer_shadows(
 }
 
 /// The inset shadows of `shadows`, clipped to the box (paint them after the box).
-/// Inset spread isn't supported yet – no Kiesel control uses it.
+/// Spread shrinks the hole (a 1px spread without offset or blur is an inner edge).
 pub fn inset_shadows(
     ctx: &mut RenderContext,
     rect: Rect,
@@ -69,7 +69,8 @@ pub fn inset_shadows(
     ctx.push_clip_layer(&rounded(rect, radius));
     for (s, color) in shadows {
         ctx.set_paint(color);
-        let hole = rect + Vec2::new(s.x, s.y);
+        let hole = (rect + Vec2::new(s.x, s.y)).inflate(-s.spread, -s.spread);
+        let radius = (radius - s.spread).max(0.0);
         let sigma = s.blur / 2.0;
         // Everything outside the shifted box is solid shadow. With blur, the inverted
         // blurred box covers its own bounds (box + 2.5 σ); outside of that we fill.

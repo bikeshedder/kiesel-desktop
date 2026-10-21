@@ -32,6 +32,7 @@ Goal: far less memory than a WebView. No browser, no JS, no Tauri.
 | same at 1× | 9.2 MiB PSS, 13.4 MiB RSS |
 | Two-button demo with AccessKit active (AT-SPI listening), loading, 1280×800 px | 16.0 MiB PSS, 23.4 MiB RSS, 4 threads |
 | Dialog demo (card, wrapped text, two buttons), AccessKit active, loading, 1280×840 px | 19.3 MiB PSS, 25.2 MiB peak RSS |
+| Form demo (text field in use, CJK text, clipboard thread), AccessKit active, 1040×720 px | 19.6 MiB PSS, 24.9 MiB peak RSS, 5 threads |
 
 Estimates (not measured yet, needs real hardware): GPU path with wgpu on Mesa ~50–90 MB, on NVIDIA ~120–200 MB.
 Full CPU redraws took ~55 ms in the unoptimised probe (120 blurred cards) → damage regions and cached shadows are required for dense screens.
@@ -49,8 +50,10 @@ kiesel-headless shot out.png          # grim
 kiesel-headless move 640 400          # logical coordinates (tools/kiesel-input)
 kiesel-headless click 640 400         # also: down, up, scroll <dy>
 kiesel-headless key shift+Tab         # also: keydown, keyup, type <text> (us layout)
+kiesel-headless ime preedit ありが     # act as the input method: also commit, clear, delete <b> <a>
 kiesel-headless a11y                  # AT-SPI tree
 kiesel-headless a11y click "Save changes"   # also: focus, where (centre), box (x y w h) <name>
+kiesel-headless a11y set --role entry Name = Text   # also: value, caret [= offset]
 kiesel-headless stop
 ```
 
@@ -59,8 +62,12 @@ and 2 – and finds the buttons through the accessibility tree, not by coordinat
 wrapping on resize, that animation frames redraw only a small region, and that partial redraws match full ones
 (`KIESEL_FULL_REDRAW=1`) within ±2 per channel – the same pixel can round one step apart at another origin.
 
+`tests/form-demo.sh` covers text input: keyboard editing, pointer selection, the Wayland clipboard both ways,
+the input method (on only while a field is focused), AT-SPI Text/EditableText, and the caret's frame cost.
+
 `wlrctl`/`wtype` create a device per call, which clients never get to bind; `tools/kiesel-input` keeps one virtual
-pointer and keyboard for the whole session. Open: no IME and no portal (file dialogs) in the headless session yet.
+pointer and keyboard for the whole session, and registers as the seat's input method (input-method-v2). Open: no
+portal (file dialogs) in the headless session yet.
 
 ## Milestones
 
@@ -84,5 +91,12 @@ pointer and keyboard for the whole session. Open: no IME and no portal (file dia
      (reactive_graph's immediate effects, no executor); a change on any thread queues the widget and wakes the
      event loop, and only queued widgets and those that got events are updated. `Label::bound` follows a
      signal. The dialog demo saves on a background thread.
-   - b) `TextField` with editing, selection, clipboard and IME; the headless session gets an input method.
+   - ✅ b) `TextField` – parley's `PlainEditor` in Kiesel's field well: caret and selection by pointer (click,
+     drag, double/triple click, Shift+click) and keyboard (arrows, Home/End, Shift, Ctrl by word, Backspace/Delete,
+     Ctrl+A/C/X/V), horizontal scrolling, input method composition (underlined, candidate window at the caret;
+     winit's text-input-v3), clipboard (smithay-clipboard on the window's own Wayland connection, arboard
+     elsewhere), the value as a two-way signal. For assistive technology it exposes AccessKit text runs (≤ 255
+     characters each, from parley's clusters, without uncommitted composition) and the text selection, so screen
+     readers get AT-SPI Text and EditableText: read it, move the caret, set the text. The caret blinks GTK-style
+     (10 s, then steady) on timers – 2 frames/s, none when idle.
 5. Port components following kiesel's ROADMAP order.

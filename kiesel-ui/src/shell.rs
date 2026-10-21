@@ -26,23 +26,31 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Instant;
 
+use raw_window_handle::HasDisplayHandle;
 use softbuffer::{Context, Surface};
 use vello_cpu::kurbo::{Affine, Point, Rect, Size};
 use vello_cpu::{Pixmap, RenderContext, Resources};
 use winit::application::ApplicationHandler;
 use winit::cursor::{Cursor, CursorIcon};
-use winit::event::{ButtonSource, ElementState, KeyEvent, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop, OwnedDisplayHandle};
+use winit::dpi::{LogicalPosition, LogicalSize};
+use winit::event::{
+    ButtonSource, ElementState, Ime as WinitIme, KeyEvent, MouseButton, WindowEvent,
+};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
-use winit::window::{Theme as WinitTheme, Window, WindowAttributes, WindowId};
+use winit::window::{
+    ImeCapabilities, ImeEnableRequest, ImeRequest, ImeRequestData, Theme as WinitTheme, Window,
+    WindowAttributes, WindowId,
+};
 
 use crate::a11y::Accessibility;
+use crate::clipboard::Clipboard;
 use crate::layout::Layout;
 use crate::reactive::{Inbox, MountCx};
 use crate::text::Text;
 use crate::theme::{Appearance, Scheme, Theme};
 use crate::widget::{
-    self, Event, EventCx, LayoutCx, PaintCx, Widget, WidgetId, accessibility_nodes,
+    self, Event, EventCx, Ime, LayoutCx, PaintCx, Widget, WidgetId, accessibility_nodes,
 };
 
 pub struct Options {
@@ -102,6 +110,11 @@ pub fn run(
         focused: None,
         focus_visible: false,
         modifiers: ModifiersState::empty(),
+        last_press: None,
+        clicks: 1,
+        clipboard: Clipboard::none(),
+        wake: None,
+        ime_area: None,
         a11y: None,
     };
     event_loop.run_app(app)?;
@@ -146,8 +159,20 @@ struct Shell {
     focused: Option<WidgetId>,
     focus_visible: bool,
     modifiers: ModifiersState,
+    /// When and where the last press was (for double and triple clicks)
+    last_press: Option<(Instant, Point)>,
+    clicks: u8,
+    clipboard: Clipboard,
+    /// The time the loop sleeps until (see `about_to_wait`)
+    wake: Option<Instant>,
+    /// The input method is on, with its candidate window at this area
+    ime_area: Option<Rect>,
     a11y: Option<Accessibility>,
 }
+
+/// Presses this close in time and space count as one double or triple click (GTK's defaults)
+const MULTI_CLICK_TIME: std::time::Duration = std::time::Duration::from_millis(400);
+const MULTI_CLICK_DISTANCE: f64 = 5.0;
 
 impl Shell {
     fn scale(&self) -> f64 {
@@ -189,6 +214,10 @@ impl Shell {
         let mut cx = EventCx {
             theme: &self.theme,
             now: Instant::now(),
+            text: &mut self.text,
+            clipboard: &mut self.clipboard,
+            modifiers: self.modifiers,
+            clicks: self.clicks,
         };
         match widget::find_mut(self.root.as_mut(), id) {
             Some(w) => {
@@ -286,9 +315,48 @@ impl Shell {
             s.window().set_cursor(Cursor::Icon(cursor));
         }
         self.update_accessibility();
+        self.update_ime();
         if self.damage.is_some() || self.full_damage {
             self.request_redraw();
         }
+    }
+
+    /// The input method is on while a widget that takes text is focused, its
+    /// candidate window next to the caret
+    fn update_ime(&mut self) {
+        let Some(s) = &self.window else { return };
+        let area = self
+            .focused
+            .and_then(|id| widget::find(self.root.as_ref(), id))
+            .filter(|w| w.accepts_text())
+            .map(|w| w.ime_area().unwrap_or(w.bounds()));
+        if area == self.ime_area {
+            return;
+        }
+        let window = s.window();
+        match area {
+            Some(a) => {
+                let data = ImeRequestData::default().with_cursor_area(
+                    LogicalPosition::new(a.x0, a.y0).into(),
+                    LogicalSize::new(a.width().max(1.0), a.height().max(1.0)).into(),
+                );
+                let request = if self.ime_area.is_some() {
+                    ImeRequest::Update(data)
+                } else {
+                    let caps = ImeCapabilities::new().with_cursor_area();
+                    match ImeEnableRequest::new(caps, data) {
+                        Some(r) => ImeRequest::Enable(r),
+                        None => return,
+                    }
+                };
+                // without an input method there is nothing to update; typing still works
+                let _ = window.request_ime_update(request);
+            }
+            None => {
+                let _ = window.request_ime_update(ImeRequest::Disable);
+            }
+        }
+        self.ime_area = area;
     }
 
     fn set_focus(&mut self, id: Option<WidgetId>, visible: bool) {
@@ -375,6 +443,12 @@ impl Shell {
     }
 
     fn pointer_down(&mut self, p: Point) {
+        let now = Instant::now();
+        let repeat = self.last_press.is_some_and(|(t, at)| {
+            now.duration_since(t) <= MULTI_CLICK_TIME && at.distance(p) <= MULTI_CLICK_DISTANCE
+        });
+        self.clicks = if repeat { self.clicks % 3 + 1 } else { 1 };
+        self.last_press = Some((now, p));
         self.pointer = Some(p);
         self.update_hover(p);
         let target = self.hovered;
@@ -424,6 +498,7 @@ impl Shell {
             Event::KeyDown {
                 key: event.logical_key,
                 repeat: event.repeat,
+                text: event.text.map(|t| t.to_string()),
             }
         } else {
             Event::KeyUp {
@@ -441,6 +516,16 @@ impl Shell {
         match request.action {
             accesskit::Action::Click => {
                 self.send(id, Event::Activate);
+            }
+            accesskit::Action::SetTextSelection => {
+                if let Some(accesskit::ActionData::SetTextSelection(sel)) = request.data {
+                    self.send(id, Event::SetTextSelection(sel));
+                }
+            }
+            accesskit::Action::SetValue => {
+                if let Some(accesskit::ActionData::Value(v)) = request.data {
+                    self.send(id, Event::SetValue(v.into()));
+                }
             }
             accesskit::Action::Focus => {
                 let focusable = widget::find(self.root.as_ref(), id).is_some_and(|w| w.focusable());
@@ -663,10 +748,29 @@ impl ApplicationHandler for Shell {
         let theme = window.theme();
         let context = Context::new(event_loop.owned_display_handle()).expect("softbuffer context");
         self.window = Some(Surface::new(&context, window).expect("softbuffer surface"));
+        if let Ok(display) = event_loop.owned_display_handle().display_handle() {
+            self.clipboard = Clipboard::new(display.as_raw());
+        }
         self.a11y = Some(Accessibility::new(event_loop.create_proxy()));
         self.set_scheme(theme);
         self.invalidate_all();
         self.changed();
+    }
+
+    /// Before the loop sleeps: if the time we woke up for has come, redraw the
+    /// widgets that asked for it (a blinking caret); then sleep until the next one
+    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
+        let now = Instant::now();
+        let (mut next, mut inks) = (None, Vec::new());
+        widget::wakes(self.root.as_ref(), now, &mut next, &mut inks);
+        if self.wake.is_some_and(|t| t <= now) {
+            for r in inks {
+                self.add_damage(r);
+            }
+            self.request_redraw();
+        }
+        self.wake = next;
+        event_loop.set_control_flow(next.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 
     fn proxy_wake_up(&mut self, _: &dyn ActiveEventLoop) {
@@ -701,6 +805,24 @@ impl ApplicationHandler for Shell {
                 }
             }
             WindowEvent::RedrawRequested => self.redraw(),
+            WindowEvent::Ime(ime) => {
+                let ime = match ime {
+                    WinitIme::Preedit(text, cursor) => Ime::Preedit { text, cursor },
+                    WinitIme::Commit(text) => Ime::Commit(text),
+                    WinitIme::DeleteSurrounding {
+                        before_bytes,
+                        after_bytes,
+                    } => Ime::DeleteSurrounding {
+                        before: before_bytes,
+                        after: after_bytes,
+                    },
+                    _ => return,
+                };
+                if let Some(focused) = self.focused {
+                    self.send(focused, Event::Ime(ime));
+                    self.changed();
+                }
+            }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput {
                 event,

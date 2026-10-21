@@ -91,6 +91,16 @@ pub struct Theme {
     pub control_shadow_pressed: [Shadow; 2],
     /// `--ksl-focus-ring`: 0 0 0 3px, the accent at 45 %
     pub focus_ring: Shadow,
+    /// `--ksl-accent-soft`: selections, soft tints
+    pub accent_soft: Color,
+    /// `--ksl-field-bg`: the well of text fields
+    pub field_bg: Color,
+    /// `--ksl-field-shadow`: a 1px inner edge, an inner shade at the top, a sheen below
+    pub field_shadow: [Shadow; 3],
+    /// The edge while the pointer is over the field (`--ksl-text-3` at 55 %)
+    pub field_shadow_hover: [Shadow; 3],
+    /// `--ksl-field-shadow-focus`: the edge in the accent, a 3px ring at 22 %
+    pub field_shadow_focus: [Shadow; 3],
     pub metrics: Metrics,
 }
 
@@ -115,6 +125,18 @@ pub struct Metrics {
     pub font_family: &'static str,
     /// `--ksl-duration`, in seconds
     pub duration: f64,
+}
+
+/// A field's shadows: `inset 0 0 0 1px edge, inset 0 1.5px 1.5px inner, last`
+fn field(edge: Color, inner: Color, last: Shadow) -> [Shadow; 3] {
+    [
+        Shadow {
+            spread: 1.0,
+            ..inset(0.0, 0.0, 0.0, edge)
+        },
+        inset(0.0, 1.5, 1.5, inner),
+        last,
+    ]
 }
 
 fn oklch(l: f32, c: f32, h: f32, a: f32) -> Color {
@@ -150,6 +172,9 @@ impl Theme {
             bg_bottom,
             hover_top,
             hover_bottom,
+            field_bg,
+            field_edge,
+            field_inner,
         ) = match scheme {
             Scheme::Light => (
                 n(0.949, 0.0058),
@@ -168,6 +193,9 @@ impl Theme {
                 n(0.962, 0.0054),
                 Color::from_rgb8(0xff, 0xff, 0xff),
                 n(0.973, 0.0041),
+                n(0.930, 0.0087),
+                oklch(0.374, 0.0353 * t, hue, 0.24),
+                oklch(0.374, 0.0353 * t, hue, 0.10),
             ),
             Scheme::Dark => (
                 n(0.275, 0.0240),
@@ -186,6 +214,9 @@ impl Theme {
                 n(0.322, 0.0280),
                 n(0.385, 0.0320),
                 n(0.343, 0.0300),
+                n(0.240, 0.0210),
+                oklch(0.090, 0.0100 * t, hue, 0.55),
+                oklch(0.090, 0.0100 * t, hue, 0.35),
             ),
         };
 
@@ -218,6 +249,22 @@ impl Theme {
                 spread: 3.0,
                 ..outer(0.0, 0.0, 0.0, accent.multiply_alpha(0.45))
             },
+            accent_soft: mix(bg, accent, if scheme == Scheme::Dark { 0.18 } else { 0.16 }),
+            field_bg,
+            field_shadow: field(field_edge, field_inner, outer(0.0, 1.0, 0.0, sheen)),
+            field_shadow_hover: field(
+                text_3.multiply_alpha(0.55),
+                field_inner,
+                outer(0.0, 1.0, 0.0, sheen),
+            ),
+            field_shadow_focus: field(
+                accent,
+                field_inner,
+                Shadow {
+                    spread: 3.0,
+                    ..outer(0.0, 0.0, 0.0, accent.multiply_alpha(0.22))
+                },
+            ),
             metrics: Metrics {
                 control: 40.0 * f64::from(ap.density),
                 radius: 6.0 * f64::from(ap.roundness),

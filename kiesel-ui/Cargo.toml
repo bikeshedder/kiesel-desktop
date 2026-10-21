@@ -13,9 +13,14 @@ softbuffer = { version = "0.4.8", default-features = false, features = ["wayland
 vello_cpu = "0.3"
 parley = "0.12"
 bytemuck = "1"
+raw-window-handle = "0.6"
+arboard = { version = "3.7", default-features = false }
 accesskit = "0.25"
 reactive_graph = "0.2.16"
 taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 accesskit_unix = "0.24"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+smithay-clipboard = "0.7"

@@ -25,6 +25,11 @@ impl Default for Text {
 }
 
 impl Text {
+    /// For parley's editor, which shapes as it edits
+    pub(crate) fn contexts(&mut self) -> (&mut FontContext, &mut LayoutContext<()>) {
+        (&mut self.fonts, &mut self.layouts)
+    }
+
     /// Shaped text, not yet broken into lines – see [`wrap`]
     pub fn paragraph(&mut self, text: &str, style: &TextStyle) -> Layout<()> {
         let mut b = self
