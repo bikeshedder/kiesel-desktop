@@ -17,9 +17,20 @@ Goal: far less memory than a WebView. No browser, no JS, no Tauri.
 | Rendering | **vello_cpu + softbuffer first**; GPU (vello_hybrid or own wgpu SDF pipeline) later | Lowest memory, deterministic pixels for screenshot tests; `fill_blurred_rounded_rect` (with `invert` for inset shadows) covers Soft UI's raised and pressed looks |
 | Text | parley / fontique (HarfRust, skrifa) | Active, system font fallback, editing/IME support; API still churns (0.12 split the crate) – wrap it |
 | Layout | taffy | flex/grid like the CSS original |
-| Accessibility | AccessKit (AT-SPI over zbus on Linux) | pure Rust |
+| Accessibility | AccessKit (AT-SPI over zbus on Linux) | pure Rust; zbus 5 until AccessKit moves to 6 (see Dependency watch) |
 | Reactivity | reactive_graph (Leptos) | fine-grained signals, the SolidJS model |
 | Dialogs / clipboard / menus | rfd (`xdg-portal`, no GTK) · arboard or smithay-clipboard · muda on macOS/Windows only | muda needs GTK on Linux; Linux menus are drawn by us |
+
+## Dependency watch (2026-10-21)
+
+`cargo deny` flags crates whose authors stopped maintaining them. Where a maintained alternative exists we
+switch; otherwise the advisory is ignored in `deny.toml` with its reason, and listed here to revisit.
+
+| Crate | Via | Status | What to do |
+|---|---|---|---|
+| ttf-parser | winit → sctk-adwaita → ab_glyph | **Replaced**: winit's `wayland-csd-adwaita-skrifa` draws the title with skrifa, which parley already uses (same version, no duplicate) | – |
+| zvariant, zvariant_derive, zbus_names | accesskit_unix → atspi; our portal code | Merged into zbus 6.0 (2026-10-16), not abandoned. atspi 0.30/accesskit_unix 0.24 are on zbus 5; AccessKit waits because of zbus 6's MSRV (1.89), and ignores the same advisories (PR #834) | Move our `zbus` to 6 together with accesskit_unix – earlier would put two zbus versions in the tree |
+| paste | reactive_graph (Leptos) | A compile-time macro in two places (`callback.rs`); nothing at runtime. Maintained fork: pastey. Leptos main and 0.3.0-rc0 still use paste | Offer Leptos a PR for pastey. If reactive_graph ever stalls: **roll our own reactive core** – we use a small part (`ArcSignal`, `ArcRwSignal`, `derive`, `ImmediateEffect`), behind `reactive.rs` and the `lib.rs` exports |
 
 ## Measured baselines
 

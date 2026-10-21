@@ -60,3 +60,11 @@ allow-git = []
 
 [advisories]
 yanked = "deny"
+# "Unmaintained" notices with no maintained replacement we can switch to yet; see
+# PLAN.md "Dependency watch". Other advisories for these crates still fail the check.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste: a compile-time macro in reactive_graph (callback.rs), nothing at runtime; pastey is the fork, but only Leptos can switch" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6; atspi/accesskit_unix are on zbus 5 (accesskit ignores this too, PR #834)" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6; as above" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: merged into zbus 6; as above" },
+]

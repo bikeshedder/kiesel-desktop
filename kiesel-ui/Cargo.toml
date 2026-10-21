@@ -8,7 +8,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-winit = { version = "=0.31.0-beta.3", default-features = false, features = ["wayland", "wayland-dlopen", "wayland-csd-adwaita", "x11"] }
+winit = { version = "=0.31.0-beta.3", default-features = false, features = ["wayland", "wayland-dlopen", "wayland-csd-adwaita-skrifa", "x11"] }
 softbuffer = { version = "0.4.8", default-features = false, features = ["wayland", "wayland-dlopen", "x11", "x11-dlopen"] }
 vello_cpu = "0.3"
 parley = "0.12"
