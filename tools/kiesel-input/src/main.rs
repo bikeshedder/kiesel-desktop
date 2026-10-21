@@ -9,7 +9,10 @@
 //!   kiesel-input <width> <height> <command-fifo> <ack-fifo>
 //!
 //! Pointer (logical coordinates): `move x y`, `down [button]`, `up [button]`,
-//! `click x y [button]`, `scroll dy` – buttons: left, right, middle.
+//! `click x y [button]` – buttons: left, right, middle. Scrolling (positive =
+//! down): `wheel <notches>` (a mouse wheel, discrete steps), `swipe <dy> <steps>
+//! <ms>` (two fingers on a touchpad: `steps` events over `ms`, then the fingers
+//! lift), `scroll dy` (one bare axis event).
 //!
 //! Keyboard (us layout): `key <combo>`, `keydown <combo>`, `keyup <combo>`,
 //! `type <text>` – a combo is xkb key names joined by `+`, e.g. `Tab`,
@@ -335,6 +338,40 @@ impl Devices {
                 self.pointer.button(code, true);
                 sync(state)?;
                 self.pointer.button(code, false);
+            }
+            "wheel" => {
+                let notches = num(words.next())? as i32;
+                self.pointer.vp.axis_source(wl_pointer::AxisSource::Wheel);
+                // 15 units per notch is what libinput reports for a wheel
+                self.pointer.vp.axis_discrete(
+                    now_ms(),
+                    wl_pointer::Axis::VerticalScroll,
+                    f64::from(15 * notches),
+                    notches,
+                );
+                self.pointer.vp.frame();
+            }
+            "swipe" => {
+                let (dy, steps, ms) = (num(words.next())?, num(words.next())?, num(words.next())?);
+                let steps = steps.max(1.0) as u32;
+                let pause = std::time::Duration::from_secs_f64(ms / 1000.0 / f64::from(steps));
+                for _ in 0..steps {
+                    self.pointer.vp.axis_source(wl_pointer::AxisSource::Finger);
+                    self.pointer.vp.axis(
+                        now_ms(),
+                        wl_pointer::Axis::VerticalScroll,
+                        dy / f64::from(steps),
+                    );
+                    self.pointer.vp.frame();
+                    sync(state)?;
+                    std::thread::sleep(pause);
+                }
+                // the fingers lift: the client may continue with momentum
+                self.pointer.vp.axis_source(wl_pointer::AxisSource::Finger);
+                self.pointer
+                    .vp
+                    .axis_stop(now_ms(), wl_pointer::Axis::VerticalScroll);
+                self.pointer.vp.frame();
             }
             "scroll" => {
                 self.pointer.vp.axis(

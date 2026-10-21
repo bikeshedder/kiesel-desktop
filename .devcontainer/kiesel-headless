@@ -9,7 +9,9 @@
 #   kiesel-headless move <x> <y>                          move the pointer to logical x,y
 #   kiesel-headless click <x> <y> [left|right|middle]     move there and click
 #   kiesel-headless down|up [button]                      press / release (drag, hold)
-#   kiesel-headless scroll <dy>                           vertical scroll in logical pixels
+#   kiesel-headless wheel <notches>                       mouse wheel (positive = down)
+#   kiesel-headless swipe <dy> [steps] [ms]               two-finger touchpad scroll, then lift
+#   kiesel-headless scroll <dy>                           one bare vertical axis event
 #   kiesel-headless key <combo>                           press and release, e.g. Tab, shift+Tab, space
 #   kiesel-headless keydown|keyup <combo>                 hold / let go
 #   kiesel-headless type <text>                           type text (us layout)
@@ -27,6 +29,7 @@
 #   kiesel-headless a11y value <name>                     its value (text fields)
 #   kiesel-headless a11y set <name> = <value>             set its value, as a screen reader would
 #   kiesel-headless a11y caret <name> [= offset]          print (or move) its caret, in characters
+#   kiesel-headless a11y scrollto <name>                  ask to scroll it into view (Component.ScrollTo)
 #   kiesel-headless stop
 #
 # Software rendering only: sway uses the pixman renderer, clients get Mesa's
@@ -165,6 +168,8 @@ case "$cmd" in
   click) [[ $# -ge 2 ]] || die "click <x> <y> [button]"; input click "$@" ;;
   down | up) input "$cmd" "$@" ;;
   scroll) [[ $# -eq 1 ]] || die "scroll <dy>"; input scroll "$1" ;;
+  wheel) [[ $# -eq 1 ]] || die "wheel <notches>"; input wheel "$1" ;;
+  swipe) [[ $# -ge 1 ]] || die "swipe <dy> [steps] [ms]"; input swipe "$1" "${2:-10}" "${3:-100}" ;;
   key | keydown | keyup) [[ $# -eq 1 ]] || die "$cmd <combo>"; input "$cmd" "$1" ;;
   type) [[ $# -ge 1 ]] || die "type <text>"; input type "$*" ;;
   ime) [[ $# -ge 1 ]] || die "ime preedit|commit|clear|delete …"; input ime "$*" ;;
@@ -229,6 +234,9 @@ elif verb == "focus":
 elif verb == "value":
     text = acc.queryText()
     print(text.getText(0, text.characterCount))
+elif verb == "scrollto":
+    if not acc.queryComponent().scrollTo(pyatspi.SCROLL_ANYWHERE):
+        sys.exit(f"{name!r} could not be scrolled into view")
 elif verb == "caret":
     text = acc.queryText()
     if value is None:
@@ -248,5 +256,5 @@ else:
     sys.exit(f"unknown a11y verb {verb}")
 EOF
     ;;
-  *) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
+  *) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
 esac
