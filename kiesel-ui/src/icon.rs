@@ -147,6 +147,8 @@ pub enum Tone {
     #[default]
     Icon,
     Accent,
+    /// `--ksl-danger`: errors
+    Danger,
 }
 
 impl Tone {
@@ -155,6 +157,7 @@ impl Tone {
             Tone::Text(role) => theme.text_color(role),
             Tone::Icon => theme.icon,
             Tone::Accent => theme.accent,
+            Tone::Danger => theme.danger,
         }
     }
 }

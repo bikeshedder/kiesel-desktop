@@ -77,6 +77,12 @@ impl Flex {
         .min_width_zero()
     }
 
+    /// Room before the first child on the inline axis, in logical pixels
+    pub fn padding_start(mut self, px_start: f64) -> Self {
+        self.style.padding.left = px(px_start);
+        self
+    }
+
     /// `min-width: 0` – may shrink below its content, so text inside can wrap
     fn min_width_zero(mut self) -> Self {
         self.style.min_size.width = taffy::LengthPercentageAuto::length(0.0);

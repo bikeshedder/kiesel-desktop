@@ -347,6 +347,16 @@ pub trait Widget: AsAny {
         false
     }
 
+    /// Inside a [`Field`](crate::Field): what labels and describes it, whether
+    /// it is invalid. Called once, before it is mounted.
+    fn link_field(&mut self, _link: crate::field::FieldLink) {}
+
+    /// A press at `p` on it focuses this widget instead (it isn't focusable
+    /// itself): a field's label focuses its control, like `<label for>`
+    fn press_focuses(&self, _p: Point) -> Option<WidgetId> {
+        None
+    }
+
     /// Shortcuts it answers wherever focus is, with [`Event::Shortcut`] – while
     /// it is in the tree (inside an open popup, before the window's own)
     fn shortcuts(&self) -> &[Shortcut] {

@@ -83,8 +83,11 @@ Without these, every widget after Field and Checkbox would be built twice.
 
 What most desktop apps need first, settings dialogs above all.
 
-- [ ] **M** `Field` – label, hint and error around a control; names it for assistive technology (labelled-by
-  instead of `TextField::label`), red edge and message when invalid.
+- [x] **M** `Field` – label (with a red `*` when required), the control, then the error (warning icon) or else
+  the hint. The control learns it through `Widget::link_field`: labelled-by the label (AT-SPI names it from
+  that), described by the message, required, invalid – and draws a red edge and ring. A press on the label
+  focuses the control (`Widget::press_focuses`). Open: AT-SPI has no invalid state from AccessKit (Windows and
+  macOS get it); the web's error fade-in. Example: `field`.
 - [ ] **M** `Checkbox`, `CheckboxGroup`, `Radio`; `Switch` with a visible label and description (settings rows,
   label first).
 - [ ] **S** `SegmentedControl` / `ToggleGroup` – e.g. System · Light · Dark next to the ThemeSwitch.

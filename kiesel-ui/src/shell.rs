@@ -717,11 +717,22 @@ impl Shell {
         self.update_hover(p);
         let target = self.hovered;
         self.captured = target;
-        // a press focuses what it hits (if focusable), or nothing – without a ring
+        // a press focuses what it hits (if focusable), or what a label there
+        // points to, or nothing – without a ring
         let focusable = target
             .and_then(|id| widget::find(self.root.as_ref(), id))
             .is_some_and(|w| w.focusable());
-        self.set_focus(target.filter(|_| focusable), false);
+        let focus = if focusable {
+            target
+        } else {
+            target
+                .and_then(|t| widget::path(self.root.as_ref(), t))
+                .unwrap_or_default()
+                .into_iter()
+                .rev()
+                .find_map(|id| widget::find(self.root.as_ref(), id)?.press_focuses(p))
+        };
+        self.set_focus(focus, false);
         if let Some(target) = target {
             self.send(target, Event::PointerDown(p));
         }

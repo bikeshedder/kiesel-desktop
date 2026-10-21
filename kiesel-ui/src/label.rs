@@ -2,11 +2,12 @@
 //! word boundaries to whatever width layout gives it.
 
 use parley::Layout;
-use reactive_graph::traits::{Track, WithUntracked};
+use reactive_graph::traits::{GetUntracked, Track, WithUntracked};
 use reactive_graph::wrappers::read::ArcSignal;
 use vello_cpu::kurbo::{Rect, Size};
 
 use crate::i18n::IntoText;
+use crate::icon::Tone;
 use crate::reactive::{MountCx, Watch};
 use crate::text::{self, wrap};
 use crate::theme::{TextRole, TextStyle};
@@ -19,6 +20,11 @@ pub struct Label {
     /// The text as of the last update – what is shaped and on screen
     shown: String,
     role: TextRole,
+    /// Kept from assistive technology (`aria-hidden`): it repeats what the
+    /// tree says otherwise
+    hidden: bool,
+    /// Another colour than the role's – may change (a field's label turns red)
+    tone: Option<ArcSignal<Tone>>,
     /// Shaped once; broken into lines again only when the width changes
     layout: Option<Layout<()>>,
     /// What it was shaped with – the theme's text size can change
@@ -37,6 +43,8 @@ impl Label {
             watch: None,
             text,
             role: TextRole::Body,
+            tone: None,
+            hidden: false,
             layout: None,
             style: None,
             broken_at: None,
@@ -46,6 +54,19 @@ impl Label {
 
     pub fn role(mut self, role: TextRole) -> Self {
         self.role = role;
+        self
+    }
+
+    /// Kept from assistive technology, like `aria-hidden` – a decoration whose
+    /// meaning the tree already has (a required field's asterisk)
+    pub fn hidden(mut self) -> Self {
+        self.hidden = true;
+        self
+    }
+
+    /// Its colour, instead of the role's: a [`Tone`], or a signal of one
+    pub fn tone(mut self, tone: impl Into<ArcSignal<Tone>>) -> Self {
+        self.tone = Some(tone.into());
         self
     }
 
@@ -88,8 +109,13 @@ impl Widget for Label {
     }
 
     fn mount(&mut self, cx: &mut MountCx<'_>) {
-        let text = self.text.clone();
-        self.watch = Some(cx.watch(self.id, move || text.track()));
+        let (text, tone) = (self.text.clone(), self.tone.clone());
+        self.watch = Some(cx.watch(self.id, move || {
+            text.track();
+            if let Some(tone) = &tone {
+                tone.track();
+            }
+        }));
     }
 
     /// New text or another text size: shape again, and its size may change
@@ -98,7 +124,12 @@ impl Widget for Label {
             .style
             .is_some_and(|s| s != cx.theme.text_style(self.role));
         if !restyled && self.text.with_untracked(|t| *t == self.shown) {
-            return Change::NONE;
+            // the tone may have changed: a repaint is cheap
+            return if self.tone.is_some() {
+                Change::PAINT
+            } else {
+                Change::NONE
+            };
         }
         self.shown = self.text.with_untracked(String::clone);
         self.layout = None;
@@ -145,14 +176,17 @@ impl Widget for Label {
                 cx.res,
                 layout,
                 self.bounds.origin(),
-                cx.theme.text_color(self.role),
+                match &self.tone {
+                    Some(tone) => tone.get_untracked().color(cx.theme),
+                    None => cx.theme.text_color(self.role),
+                },
             );
         }
     }
 
     /// Empty text says nothing: it stays out of the tree
     fn accessibility(&self) -> Option<accesskit::Node> {
-        if self.shown.is_empty() {
+        if self.shown.is_empty() || self.hidden {
             return None;
         }
         let mut node = accesskit::Node::new(accesskit::Role::Label);

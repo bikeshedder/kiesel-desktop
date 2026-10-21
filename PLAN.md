@@ -75,7 +75,7 @@ kiesel-headless key shift+Tab         # also: keydown, keyup, type <text> (us la
 kiesel-headless ime preedit ありが     # act as the input method: also commit, clear, delete <b> <a>
 kiesel-headless a11y                  # AT-SPI tree
 kiesel-headless a11y click "Save changes"   # also: focus, where (centre), box (x y w h) <name>
-kiesel-headless a11y set --role entry Name = Text   # also: value, caret [= offset]
+kiesel-headless a11y set --role entry Name = Text   # also: value, caret [= offset], info (description, states)
 kiesel-headless portal dark           # the system's colour scheme, from a fake XDG portal; also
                                       # accent R G B, contrast high, motion reduce, text-scale 1.5
 kiesel-headless stop
@@ -91,6 +91,7 @@ wrapping on resize, that animation frames redraw only a small region, and that p
 `tests/list-demo.sh` scrolls by wheel, touchpad (momentum), keys and scrollbar, and checks AT-SPI scrollTo;
 `tests/todo-demo.sh` adds and removes widgets at runtime and watches memory.
 `tests/theme-demo.sh` follows a (fake) system preference, chooses, saves and restores the theme.
+`tests/field-demo.sh` checks names from labels, descriptions, required, label clicks and errors as they come and go.
 `tests/icons-demo.sh` checks icon-only buttons, the accessibility of icons and the spinner in the icon's place.
 `tests/shortcuts-demo.sh` presses shortcuts without focus, in a field, with a popover open, and switches language.
 `tests/settings-demo.sh` follows the portal's text scale, accent colour, contrast and reduced motion live.

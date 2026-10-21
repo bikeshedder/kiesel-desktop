@@ -18,12 +18,13 @@ use parley::Affinity;
 use parley::editing::{Cursor, PlainEditor, Selection};
 use parley::{FontFamily, FontWeight, LineHeight, StyleProperty};
 use reactive_graph::signal::ArcRwSignal;
-use reactive_graph::traits::{Set, Track, WithUntracked};
+use reactive_graph::traits::{GetUntracked, Set, Track, WithUntracked};
 use vello_cpu::kurbo::{Point, Rect, Size};
 use winit::cursor::CursorIcon;
 use winit::keyboard::{Key, NamedKey};
 
 use crate::anim::Transition;
+use crate::field::FieldLink;
 use crate::i18n::{IntoText, TextProp};
 use crate::paint;
 use crate::reactive::{MountCx, Watch};
@@ -59,6 +60,11 @@ pub struct TextField {
     watch: Option<Watch>,
     placeholder: TextProp,
     label: TextProp,
+    /// Inside a `Field`: its label, message and error state
+    field: Option<FieldLink>,
+    /// The field's error state as of the last update
+    invalid: bool,
+    description: String,
     grow: bool,
     placeholder_layout: Option<parley::Layout<()>>,
     /// What the editor was set up with – the theme's text size can change
@@ -91,6 +97,9 @@ impl TextField {
             watch: None,
             placeholder: TextProp::default(),
             label: TextProp::default(),
+            field: None,
+            invalid: false,
+            description: String::new(),
             grow: false,
             placeholder_layout: None,
             style: None,
@@ -121,8 +130,8 @@ impl TextField {
         self
     }
 
-    /// Its accessible name – what a screen reader announces. (A `Field` that
-    /// shows a label and names its control comes later; until then, set both.)
+    /// Its accessible name, without a visible label – a search box in a toolbar.
+    /// With a visible label, put it in a [`Field`](crate::Field) instead.
     pub fn label(mut self, text: impl IntoText) -> Self {
         self.label = TextProp::new(text);
         self
@@ -380,11 +389,20 @@ impl Widget for TextField {
     fn mount(&mut self, cx: &mut MountCx<'_>) {
         let value = self.value.clone();
         let (label, placeholder) = (self.label.signal(), self.placeholder.signal());
+        let field = self.field.clone();
         self.watch = Some(cx.watch(self.id, move || {
             value.track();
             label.track();
             placeholder.track();
+            if let Some(f) = &field {
+                f.invalid.track();
+                f.description.track();
+            }
         }));
+    }
+
+    fn link_field(&mut self, link: FieldLink) {
+        self.field = Some(link);
     }
 
     /// Picks up a value set from outside (not by typing), and repaints after events
@@ -419,6 +437,13 @@ impl Widget for TextField {
             self.repaint = true;
         }
         self.repaint |= self.label.refresh();
+        if let Some(f) = &self.field {
+            let (invalid, description) = (f.invalid.get_untracked(), f.description.get_untracked());
+            if (invalid, &description) != (self.invalid, &self.description) {
+                (self.invalid, self.description) = (invalid, description);
+                self.repaint = true;
+            }
+        }
         if self.value.with_untracked(|v| *v != self.synced) {
             self.synced = self.value.with_untracked(String::clone);
             self.editor.set_text(&self.synced);
@@ -603,6 +628,18 @@ impl Widget for TextField {
         if !self.label.shown.is_empty() {
             node.set_label(self.label.shown.clone());
         }
+        if let Some(f) = &self.field {
+            node.push_labelled_by(f.label.node());
+            if f.required {
+                node.set_required();
+            }
+            if self.invalid {
+                node.set_invalid(accesskit::Invalid::True);
+            }
+            if !self.description.is_empty() {
+                node.set_description(self.description.clone());
+            }
+        }
         if !self.placeholder.shown.is_empty() {
             node.set_placeholder(self.placeholder.shown.clone());
         }
@@ -669,11 +706,19 @@ impl Widget for TextField {
         let (ctx, theme, now) = (&mut *cx.ctx, cx.theme, cx.now);
         let d = theme.metrics.duration;
         let (h, f) = (self.hover.value(now, d), self.focus.value(now, d));
-        let shadows = paint::lerp_shadows(
-            &paint::lerp_shadows(&theme.field_shadow, &theme.field_shadow_hover, h),
-            &theme.field_shadow_focus,
-            f,
-        );
+        // invalid: a red edge that hovering doesn't change, a red ring when focused
+        let (rest, focused) = if self.invalid {
+            (
+                theme.field_shadow_invalid,
+                &theme.field_shadow_invalid_focus,
+            )
+        } else {
+            (
+                paint::lerp_shadows(&theme.field_shadow, &theme.field_shadow_hover, h),
+                &theme.field_shadow_focus,
+            )
+        };
+        let shadows = paint::lerp_shadows(&rest, focused, f);
         let (r, radius) = (self.bounds, theme.metrics.radius);
         paint::outer_shadows(ctx, r, radius, &shadows, 1.0);
         ctx.set_paint(theme.field_bg);

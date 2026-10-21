@@ -110,6 +110,12 @@ pub struct Theme {
     pub field_shadow_hover: [Shadow; 3],
     /// `--ksl-field-shadow-focus`: the edge in the accent, a 3px ring at 22 %
     pub field_shadow_focus: [Shadow; 3],
+    /// `--ksl-field-shadow-invalid`: the edge in `--ksl-danger`
+    pub field_shadow_invalid: [Shadow; 3],
+    /// Focused and invalid: the edge and a 3px ring in the danger colour
+    pub field_shadow_invalid_focus: [Shadow; 3],
+    /// `--ksl-danger`: errors, destructive actions
+    pub danger: Color,
     /// `--ksl-icon`: icons that aren't text
     pub icon: Color,
     /// `--ksl-hi`, `--ksl-lo`, `--ksl-lo-strong`: the light and the dark of Soft UI depth
@@ -180,6 +186,15 @@ impl Theme {
         // --ksl-c-low/mid/high: the contrast's weights between Kiesel's three levels
         let k = ap.contrast.clamp(0.0, 2.0);
         let (cl, ch) = ((1.0 - k).max(0.0), (k - 1.0).max(0.0));
+        // --ksl-danger: lighter with less contrast (light), one red in the dark
+        let danger = match scheme {
+            Scheme::Light => mix(
+                Color::from_rgb8(0xc8, 0x43, 0x5d),
+                Color::from_rgb8(0xd6, 0x5a, 0x70),
+                cl,
+            ),
+            Scheme::Dark => Color::from_rgb8(0xef, 0x83, 0x96),
+        };
         let cm = 1.0 - cl - ch;
         let c3 = |low: f32, mid: f32, high: f32| low * cl + mid * cm + high * ch;
         // the accent keeps hue and chroma of --ksl-accent-color, at each theme's lightness
@@ -321,6 +336,16 @@ impl Theme {
                     ..outer(0.0, 0.0, 0.0, accent.multiply_alpha(0.22))
                 },
             ),
+            field_shadow_invalid: field(danger, field_inner, outer(0.0, 1.0, 0.0, sheen)),
+            field_shadow_invalid_focus: field(
+                danger,
+                field_inner,
+                Shadow {
+                    spread: 3.0,
+                    ..outer(0.0, 0.0, 0.0, danger.multiply_alpha(0.22))
+                },
+            ),
+            danger,
             icon,
             hi,
             lo,
@@ -387,6 +412,13 @@ impl Theme {
             field_shadow: sh(&a.field_shadow, &b.field_shadow, t64),
             field_shadow_hover: sh(&a.field_shadow_hover, &b.field_shadow_hover, t64),
             field_shadow_focus: sh(&a.field_shadow_focus, &b.field_shadow_focus, t64),
+            field_shadow_invalid: sh(&a.field_shadow_invalid, &b.field_shadow_invalid, t64),
+            field_shadow_invalid_focus: sh(
+                &a.field_shadow_invalid_focus,
+                &b.field_shadow_invalid_focus,
+                t64,
+            ),
+            danger: c(a.danger, b.danger),
             icon: c(a.icon, b.icon),
             hi: c(a.hi, b.hi),
             lo: c(a.lo, b.lo),
@@ -433,6 +465,10 @@ pub enum TextRole {
     Title,
     /// Captions and subtitles: `--font-size-0`, `--ksl-text-3`
     Caption,
+    /// A field's label: `--font-size-0`, weight 600, `--ksl-text-2`
+    FieldLabel,
+    /// A field's error: `--font-size-0`, weight 500, `--ksl-danger`
+    Error,
 }
 
 /// Font settings of one piece of text
@@ -460,6 +496,8 @@ impl Theme {
             TextRole::Body => (16.0, 400.0, 1.5),
             TextRole::Title => (17.6, 600.0, 1.25),
             TextRole::Caption => (12.0, 400.0, 1.5),
+            TextRole::FieldLabel => (12.0, 600.0, 1.5),
+            TextRole::Error => (12.0, 500.0, 1.5),
         };
         // the desktop's text scale (font_size is 16 × it)
         let scale = self.metrics.font_size / 16.0;
@@ -477,6 +515,8 @@ impl Theme {
             TextRole::Body => self.text_2,
             TextRole::Title => self.text_1,
             TextRole::Caption => self.text_3,
+            TextRole::FieldLabel => self.text_2,
+            TextRole::Error => self.danger,
         }
     }
 
