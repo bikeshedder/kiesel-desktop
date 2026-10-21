@@ -7,3 +7,15 @@ exclude = ["tools/memprobe"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.88"
+
+# Rendering, shaping and layout are dependencies; unoptimized they are 40–80×
+# slower, which makes `cargo run` choppy (a full frame took 170–360 ms).
+# Optimize them in dev builds too – compiled once, cached – and keep our own
+# crates quick to rebuild.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Our per-pixel loops (copying frames into the window buffer) run millions of
+# times a frame; a light optimization keeps debug builds smooth and quick to build.
+[profile.dev.package.kiesel-ui]
+opt-level = 1

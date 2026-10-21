@@ -129,6 +129,7 @@ pub fn run(
         animating: Vec::new(),
         cursor: CursorIcon::Default,
         stats: std::env::var_os("KIESEL_STATS").is_some(),
+        last_frame: None,
         // KIESEL_FULL_REDRAW=1 redraws everything every frame (to compare against)
         always_full: std::env::var_os("KIESEL_FULL_REDRAW").is_some(),
         pointer: None,
@@ -180,6 +181,8 @@ struct Shell {
     animating: Vec<Rect>,
     cursor: CursorIcon,
     stats: bool,
+    /// When the last frame started (for KIESEL_STATS)
+    last_frame: Option<Instant>,
     always_full: bool,
     /// Last pointer position (logical)
     pointer: Option<Point>,
@@ -761,7 +764,7 @@ impl Shell {
             for (row, line) in src.chunks_exact(usize::from(rw) * 4).enumerate() {
                 let dst = &mut buffer[(y0 + row) * stride + x0..][..usize::from(rw)];
                 for (out, px) in dst.iter_mut().zip(line.as_chunks::<4>().0) {
-                    *out = u32::from(px[0]) << 16 | u32::from(px[1]) << 8 | u32::from(px[2]);
+                    *out = rgba_to_0rgb(u32::from_le_bytes(*px));
                 }
             }
         } else {
@@ -775,8 +778,8 @@ impl Shell {
             let target =
                 vello_cpu::PixmapMut::new(w16, h16, &mut bytes[..len]).expect("buffer size");
             ctx.render(target, &mut self.res);
-            for px in bytes[..len].as_chunks_mut::<4>().0 {
-                px.swap(0, 2);
+            for px in &mut buffer[..len / 4] {
+                *px = rgba_to_0rgb(*px);
             }
         }
         let damage = softbuffer::Rect {
@@ -788,8 +791,13 @@ impl Shell {
         buffer.present_with_damage(&[damage]).expect("presenting");
 
         if self.stats {
+            // the gap since the last frame shows the pace the compositor allows:
+            // short frames with long gaps mean the display path is the bottleneck
+            let gap = self.last_frame.map_or(String::from("first"), |t| {
+                format!("+{:.1} ms", start.duration_since(t).as_secs_f64() * 1e3)
+            });
             eprintln!(
-                "frame {}x{} @{scale}: {} {}x{} ({:.1} %, age {age}) {:.2} ms",
+                "frame {}x{} @{scale}: {} {}x{} ({:.1} %, age {age}, {gap}) {:.2} ms",
                 px.width,
                 px.height,
                 if partial { "partial" } else { "full" },
@@ -799,10 +807,18 @@ impl Shell {
                 start.elapsed().as_secs_f64() * 1e3
             );
         }
+        self.last_frame = Some(start);
         if !animating.is_empty() || !self.animating.is_empty() || self.fade.is_some() {
             surface.window().request_redraw();
         }
     }
+}
+
+/// vello_cpu writes R, G, B, A bytes – read on a little-endian machine as the word
+/// 0xAABBGGRR; softbuffer wants 0x00RRGGBB. One word at a time, not byte by byte.
+#[inline]
+fn rgba_to_0rgb(px: u32) -> u32 {
+    (px & 0xFF) << 16 | (px & 0xFF00) | (px >> 16) & 0xFF
 }
 
 fn is_modifier(key: NamedKey) -> bool {
