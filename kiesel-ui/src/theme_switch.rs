@@ -16,7 +16,8 @@ use winit::keyboard::{Key, NamedKey};
 
 use crate::anim::{Easing, Transition};
 use crate::i18n::{IntoText, TextProp, t};
-use crate::icon::{self, Icon};
+use crate::icon::IconNode;
+use crate::lucide;
 use crate::reactive::{MountCx, Watch};
 use crate::switch::Switch;
 use crate::theme::{ControlSize, Scheme, Theme, mix, space};
@@ -38,7 +39,7 @@ const ARRIVE: f64 = 0.6;
 /// An icon that is a toggle button (`aria-pressed`): no knob, just the icon
 pub struct IconToggle {
     id: WidgetId,
-    icon: Icon,
+    icon: IconNode,
     label: TextProp,
     pressed: ArcSignal<bool>,
     watch: Option<Watch>,
@@ -62,7 +63,7 @@ pub struct IconToggle {
 }
 
 impl IconToggle {
-    pub fn new(icon: Icon, label: impl IntoText, pressed: impl Into<ArcSignal<bool>>) -> Self {
+    pub fn new(icon: IconNode, label: impl IntoText, pressed: impl Into<ArcSignal<bool>>) -> Self {
         let pressed = pressed.into();
         let shown = pressed.get_untracked();
         Self {
@@ -333,9 +334,13 @@ impl ThemeSwitch {
         let mode = theming.mode();
         let children: Vec<Box<dyn Widget>> = vec![
             Box::new(
-                IconToggle::new(icon::SUN, t("kiesel.themeSwitch.light"), is(Scheme::Light))
-                    .icon_size(px, stroke)
-                    .on_press(choose(Scheme::Light)),
+                IconToggle::new(
+                    lucide::SUN,
+                    t("kiesel.themeSwitch.light"),
+                    is(Scheme::Light),
+                )
+                .icon_size(px, stroke)
+                .on_press(choose(Scheme::Light)),
             ),
             Box::new(
                 Switch::new(is(Scheme::Dark))
@@ -351,7 +356,7 @@ impl ThemeSwitch {
             ),
             Box::new(
                 IconToggle::new(
-                    icon::MOON_STAR,
+                    lucide::MOON_STAR,
                     t("kiesel.themeSwitch.dark"),
                     is(Scheme::Dark),
                 )

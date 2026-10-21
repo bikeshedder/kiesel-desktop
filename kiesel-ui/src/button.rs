@@ -18,6 +18,7 @@ use winit::keyboard::{Key, NamedKey};
 
 use crate::anim::Transition;
 use crate::i18n::{IntoText, TextProp};
+use crate::icon::{IconNode, STROKE};
 use crate::paint::{self, TOLERANCE};
 use crate::reactive::{MountCx, Watch};
 use crate::shortcut::{IntoShortcut, Shortcut};
@@ -30,6 +31,9 @@ use crate::widget::{
 /// The spinner box is 1.25em (the icon's place), the spinner itself 1.05em
 const SPINNER_BOX_EM: f64 = 1.25;
 const SPINNER_EM: f64 = 1.05;
+/// Icons are 1.25em, 1.3em on icon-only buttons
+const ICON_EM: f64 = 1.25;
+const ICON_ONLY_EM: f64 = 1.3;
 /// One turn every 900 ms, linear
 const SPIN_PERIOD: f64 = 0.9;
 
@@ -49,6 +53,11 @@ pub struct Button {
     shown_loading: bool,
     spin_start: Instant,
     on_click: Option<Box<dyn FnMut()>>,
+    /// Before and after the label
+    icon: Option<IconNode>,
+    icon_end: Option<IconNode>,
+    /// Square, the icon alone; the label only names it for assistive technology
+    icon_only: bool,
     /// Press it from anywhere in the window
     shortcuts: Vec<Shortcut>,
     hovered: bool,
@@ -82,6 +91,9 @@ impl Button {
             spin_start: Instant::now(),
             shortcuts: Vec::new(),
             on_click: None,
+            icon: None,
+            icon_end: None,
+            icon_only: false,
             hovered: false,
             pointer_armed: false,
             key_armed: false,
@@ -92,6 +104,52 @@ impl Button {
             press: Transition::new(0.0),
             ring: Transition::new(0.0),
         }
+    }
+
+    /// An icon before the label: `.icon(lucide::PLUS)` (the spinner takes its place while loading)
+    pub fn icon(mut self, icon: IconNode) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// An icon after the label
+    pub fn icon_end(mut self, icon: IconNode) -> Self {
+        self.icon_end = Some(icon);
+        self
+    }
+
+    /// Square, showing only its icon; the label still names it for assistive
+    /// technology – make it say what the button does ("Delete", not "Trash")
+    pub fn icon_only(mut self) -> Self {
+        self.icon_only = true;
+        self
+    }
+
+    /// What it shows, left to right, and how wide each is
+    fn items(&self, em: f64, label: f64) -> Vec<(Item, f64)> {
+        let lead = if self.icon_only {
+            ICON_ONLY_EM
+        } else {
+            ICON_EM
+        };
+        let mut items = Vec::new();
+        if self.shown_loading {
+            let size = if self.icon_only {
+                ICON_ONLY_EM
+            } else {
+                SPINNER_BOX_EM
+            };
+            items.push((Item::Spinner, size * em));
+        } else if let Some(icon) = self.icon {
+            items.push((Item::Icon(icon), lead * em));
+        }
+        if !self.icon_only {
+            items.push((Item::Label, label));
+            if let Some(icon) = self.icon_end {
+                items.push((Item::Icon(icon), ICON_EM * em));
+            }
+        }
+        items
     }
 
     /// Busy: a spinner before the label; the label stays
@@ -191,7 +249,8 @@ impl Widget for Button {
         change
     }
 
-    /// Inline padding + [spinner + gap] + label; at least `--ksl-control` high.
+    /// Inline padding + [spinner or icon + gap] + label [+ gap + icon]; at least
+    /// `--ksl-control` high, and square when icon-only.
     /// Never narrower: a button doesn't wrap or shrink.
     fn measure(&mut self, cx: &mut LayoutCx<'_>, _known: Known, _available: Available) -> Size {
         let m = &cx.theme.metrics;
@@ -200,14 +259,14 @@ impl Widget for Button {
         let layout = self
             .layout
             .get_or_insert_with(|| cx.text.line(&self.label.shown, &style));
-        let mut content = f64::from(layout.width());
-        if self.shown_loading {
-            content += SPINNER_BOX_EM * f64::from(m.font_size) + m.gap;
+        if self.icon_only {
+            return Size::new(m.control, m.control);
         }
-        Size::new(
-            content + 2.0 * m.padding_x,
-            m.control.max(f64::from(layout.height())),
-        )
+        let (label_w, label_h) = (f64::from(layout.width()), f64::from(layout.height()));
+        let items = self.items(f64::from(m.font_size), label_w);
+        let content = items.iter().map(|(_, w)| w).sum::<f64>()
+            + m.gap * items.len().saturating_sub(1) as f64;
+        Size::new(content + 2.0 * m.padding_x, m.control.max(label_h))
     }
 
     fn style(&self, _theme: &Theme) -> taffy::Style {
@@ -355,19 +414,12 @@ impl Widget for Button {
         paint::inset_shadows(ctx, r, radius, &raised, up);
         paint::inset_shadows(ctx, r, radius, &theme.control_shadow_pressed, down);
 
-        // content: [spinner][gap]label, centred; pressed it sinks a little
+        // content: [spinner or icon] label [icon], centred; pressed it sinks a little
         let Some(layout) = &self.layout else { return };
         let em = f64::from(m.font_size);
-        let spinner_w = if self.shown_loading {
-            SPINNER_BOX_EM * em + m.gap
-        } else {
-            0.0
-        };
-        let content = Size::new(
-            spinner_w + f64::from(layout.width()),
-            f64::from(layout.height()),
-        );
-        let origin = r.center() - content.to_vec2() / 2.0;
+        let items = self.items(em, f64::from(layout.width()));
+        let width = items.iter().map(|(_, w)| w).sum::<f64>()
+            + m.gap * items.len().saturating_sub(1) as f64;
         let centre = r.center();
         let base = *ctx.transform();
         let sink = Affine::translate(centre.to_vec2() + Vec2::new(0.0, 0.5 * p))
@@ -375,22 +427,44 @@ impl Widget for Button {
             * Affine::translate(-centre.to_vec2());
         ctx.set_transform(base * sink);
 
-        let fg = mix(theme.text_1, theme.accent_2, down);
-        if self.shown_loading {
-            let box_size = SPINNER_BOX_EM * em;
-            let c = Point::new(origin.x + box_size / 2.0, centre.y);
-            let turn = (now.duration_since(self.spin_start).as_secs_f64() / SPIN_PERIOD).fract();
-            spinner(ctx, c, SPINNER_EM * em, turn, fg);
+        // icon-only: --ksl-icon, like a standalone icon
+        let rest = if self.icon_only {
+            theme.icon
+        } else {
+            theme.text_1
+        };
+        let fg = mix(rest, theme.accent_2, down);
+        let mut x = centre.x - width / 2.0;
+        for (item, w) in items {
+            match item {
+                Item::Spinner => {
+                    let c = Point::new(x + w / 2.0, centre.y);
+                    let turn =
+                        (now.duration_since(self.spin_start).as_secs_f64() / SPIN_PERIOD).fract();
+                    let size = if self.icon_only { w } else { SPINNER_EM * em };
+                    spinner(ctx, c, size, turn, fg);
+                }
+                Item::Icon(icon) => {
+                    let square = Rect::from_center_size((x + w / 2.0, centre.y), (w, w));
+                    icon.draw(ctx, square, STROKE, fg, 0.0, 1.0);
+                }
+                Item::Label => {
+                    let y = centre.y - f64::from(layout.height()) / 2.0;
+                    text::draw(ctx, cx.res, layout, Point::new(x, y), fg);
+                }
+            }
+            x += w + m.gap;
         }
-        text::draw(
-            ctx,
-            cx.res,
-            layout,
-            Point::new(origin.x + spinner_w, origin.y),
-            fg,
-        );
         ctx.set_transform(base);
     }
+}
+
+/// One piece of a button's content
+#[derive(Clone, Copy)]
+enum Item {
+    Spinner,
+    Icon(IconNode),
+    Label,
 }
 
 /// winit reports Space as the character " ", not as a named key

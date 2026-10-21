@@ -72,8 +72,12 @@ Without these, every widget after Field and Checkbox would be built twice.
   Labels the platform's way and localised ("Ctrl+Shift+S", "Strg+Umschalt+S", "⇧⌘S"); `Kbd` shows them.
   TextField's clipboard keys use the same keymap. Open: macOS word movement (⌥), user-configurable keymaps,
   and AT-SPI key bindings (AccessKit leaves them empty on Linux). Example: `shortcuts`.
-- [ ] **S** **Icons.** A script that takes the icons an app uses from the Lucide package into Rust data, with
-  Lucide's licence notice; an `Icon` widget; icons in Button (leading, trailing, icon-only).
+- [x] **S** **Icons.** `tools/lucide-icons.py --out src/icons.rs save trash-2 …` takes the icons an app uses
+  from lucide-static (pinned version, checksum verified, cached) into `IconNode` consts, with Lucide's ISC notice
+  and Feather's MIT one when needed; the toolkit's own are in `kiesel_ui::lucide`. `Icon` (1.25 em, stroke
+  1.75, a tone; decorative unless labelled, then an image for assistive technology); Button `.icon()`,
+  `.icon_end()`, `.icon_only()` (square, named by its label; the spinner takes the icon's place). Example:
+  `icons`.
 
 ## D2 – Forms
 

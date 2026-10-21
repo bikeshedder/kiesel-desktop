@@ -91,6 +91,7 @@ wrapping on resize, that animation frames redraw only a small region, and that p
 `tests/list-demo.sh` scrolls by wheel, touchpad (momentum), keys and scrollbar, and checks AT-SPI scrollTo;
 `tests/todo-demo.sh` adds and removes widgets at runtime and watches memory.
 `tests/theme-demo.sh` follows a (fake) system preference, chooses, saves and restores the theme.
+`tests/icons-demo.sh` checks icon-only buttons, the accessibility of icons and the spinner in the icon's place.
 `tests/shortcuts-demo.sh` presses shortcuts without focus, in a field, with a popover open, and switches language.
 `tests/settings-demo.sh` follows the portal's text scale, accent colour, contrast and reduced motion live.
 `tests/form-demo.sh` covers text input: keyboard editing, pointer selection, the Wayland clipboard both ways,
