@@ -8,7 +8,7 @@ use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use vello_cpu::kurbo::{Point, Rect, Size};
+use vello_cpu::kurbo::{Point, Rect, Size, Vec2};
 use vello_cpu::{RenderContext, Resources};
 use winit::cursor::CursorIcon;
 use winit::keyboard::{Key, ModifiersState};
@@ -70,6 +70,19 @@ pub enum Event {
     SetTextSelection(accesskit::TextSelection),
     /// Input method: composition in progress, its result, or text to remove
     Ime(Ime),
+    /// Wheel or touchpad over it (or over a child that didn't take it)
+    Scroll(ScrollDelta),
+}
+
+/// How far to scroll, in logical pixels or lines; positive = towards the end
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ScrollDelta {
+    /// Wheel notches (a line each)
+    Lines(Vec2),
+    /// A touchpad's fingers, moving
+    Pixels(Vec2),
+    /// The fingers left the touchpad: momentum may follow
+    Lifted,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -133,6 +146,9 @@ pub struct EventCx<'a> {
     pub modifiers: ModifiersState,
     /// 1, 2, 3… for single, double, triple clicks (with `PointerDown`)
     pub clicks: u8,
+    /// Set by a widget that used the event: keys and scrolling go on to the
+    /// ancestors until one does
+    pub handled: bool,
 }
 
 /// What changed since the last update – reported by [`Widget::update`]
@@ -140,6 +156,8 @@ pub struct EventCx<'a> {
 pub struct Change {
     /// Its size may have changed: measure again
     pub layout: bool,
+    /// Its children moved (scrolled) – place them again, nothing to measure
+    pub place: bool,
     /// It looks different: redraw its ink
     pub paint: bool,
 }
@@ -147,14 +165,22 @@ pub struct Change {
 impl Change {
     pub const NONE: Self = Self {
         layout: false,
+        place: false,
         paint: false,
     };
     pub const PAINT: Self = Self {
         layout: false,
+        place: false,
+        paint: true,
+    };
+    pub const PLACE: Self = Self {
+        layout: false,
+        place: true,
         paint: true,
     };
     pub const LAYOUT: Self = Self {
         layout: true,
+        place: true,
         paint: true,
     };
 }
@@ -164,6 +190,7 @@ impl std::ops::BitOr for Change {
     fn bitor(self, rhs: Self) -> Self {
         Self {
             layout: self.layout || rhs.layout,
+            place: self.place || rhs.place,
             paint: self.paint || rhs.paint,
         }
     }
@@ -228,6 +255,32 @@ pub trait Widget {
 
     fn paint(&self, cx: &mut PaintCx<'_>) {
         cx.paint_children(self.children());
+    }
+
+    /// Children are placed this far up and left of where layout put them (scrolling)
+    fn content_offset(&self) -> Vec2 {
+        Vec2::ZERO
+    }
+
+    /// Children are only seen inside this (a scroll viewport): no ink, no hits outside
+    fn clip(&self) -> Option<Rect> {
+        None
+    }
+
+    /// Takes the pointer at `p` before its children do (a scrollbar over content)
+    fn claims(&self, _p: Point) -> bool {
+        false
+    }
+
+    /// After layout has placed its children: a chance to correct its offset
+    /// (content shrank while scrolled); true places the children again
+    fn children_placed(&mut self) -> bool {
+        false
+    }
+
+    /// Scrolls so that `rect` (window coordinates) is in view; true if it moved
+    fn reveal(&mut self, _rect: Rect) -> bool {
+        false
     }
 
     fn hit(&self, p: Point) -> bool {
@@ -306,11 +359,41 @@ pub fn hit_test(w: &dyn Widget, p: Point) -> Option<WidgetId> {
     if !w.hit(p) {
         return None;
     }
+    if w.claims(p) || w.clip().is_some_and(|c| !c.contains(p)) {
+        return Some(w.id());
+    }
     w.children()
         .iter()
         .rev()
         .find_map(|c| hit_test(c.as_ref(), p))
         .or(Some(w.id()))
+}
+
+/// The ids from the root down to `id`, both included
+pub fn path(w: &dyn Widget, id: WidgetId) -> Option<Vec<WidgetId>> {
+    if w.id() == id {
+        return Some(vec![id]);
+    }
+    w.children().iter().find_map(|c| {
+        let mut p = path(c.as_ref(), id)?;
+        p.insert(0, w.id());
+        Some(p)
+    })
+}
+
+/// A widget's ink as far as it can be seen (inside every clip above it)
+fn clipped(ink: Rect, clip: Option<Rect>) -> Rect {
+    match clip {
+        Some(c) => ink.intersect(c),
+        None => ink,
+    }
+}
+
+fn narrower(clip: Option<Rect>, w: &dyn Widget) -> Option<Rect> {
+    match (clip, w.clip()) {
+        (Some(a), Some(b)) => Some(a.intersect(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 /// Focusable widgets in tab order (document order)
@@ -342,6 +425,8 @@ pub(crate) fn accessibility_nodes(
             below.extend(own.iter().map(|(id, _)| *id));
             out.extend(own);
             node.set_children(below);
+            // anything may sit in a scroll view: assistive technology can ask to see it
+            node.add_action(accesskit::Action::ScrollIntoView);
             out.push((w.id().node(), node));
             vec![w.id().node()]
         }
@@ -359,12 +444,20 @@ pub(crate) fn accessible_rect(r: Rect) -> accesskit::Rect {
 }
 
 /// The ink of every widget that is animating
-pub(crate) fn animating_inks(w: &dyn Widget, now: Instant, theme: &Theme, out: &mut Vec<Rect>) {
+/// The widgets that are animating, with their visible ink
+pub(crate) fn animating(
+    w: &dyn Widget,
+    now: Instant,
+    theme: &Theme,
+    clip: Option<Rect>,
+    out: &mut Vec<(WidgetId, Rect)>,
+) {
     if w.animating(now, theme) {
-        out.push(w.ink());
+        out.push((w.id(), clipped(w.ink(), clip)));
     }
+    let clip = narrower(clip, w);
     for child in w.children() {
-        animating_inks(child.as_ref(), now, theme, out);
+        animating(child.as_ref(), now, theme, clip, out);
     }
 }
 
@@ -413,10 +506,16 @@ pub(crate) fn mount_all(w: &mut dyn Widget, cx: &mut MountCx<'_>) {
 }
 
 /// Every widget's ink, by id
-pub(crate) fn inks(w: &dyn Widget, out: &mut std::collections::HashMap<WidgetId, Rect>) {
-    out.insert(w.id(), w.ink());
+/// Every widget's visible ink, by id
+pub(crate) fn inks(
+    w: &dyn Widget,
+    clip: Option<Rect>,
+    out: &mut std::collections::HashMap<WidgetId, Rect>,
+) {
+    out.insert(w.id(), clipped(w.ink(), clip));
+    let clip = narrower(clip, w);
     for child in w.children() {
-        inks(child.as_ref(), out);
+        inks(child.as_ref(), clip, out);
     }
 }
 

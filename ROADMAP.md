@@ -25,11 +25,11 @@ The stack, measured baselines and the headless test setup are in [PLAN.md](PLAN.
 |---|---|
 | Rendering | vello_cpu into softbuffer, partial redraws with buffer age, Soft UI box shadows (outer, inset, spread) |
 | Layout & text | taffy (Flex stack/cluster), parley paragraphs, type scale, CJK and emoji fallback |
-| Input | pointer routing and capture, focus chain, `:focus-visible`, IME, clipboard, multi-click |
+| Input | pointer routing and capture, focus chain, `:focus-visible`, IME, clipboard, multi-click, bubbling keys and scrolling |
 | State | signals to the widgets that show them (any thread), timers (`wake_at`), `Show` and keyed `For` |
 | Accessibility | AccessKit on AT-SPI: roles, states, actions, text runs, caret and selection |
 | Theme | light/dark/system (XDG portal), saved per app, cross-fade, Lucide icons |
-| Widgets | Button (default, loading), Label, Card, TextField, Switch, IconToggle, ThemeSwitch |
+| Widgets | Button (default, loading), Label, Card, TextField, Switch, IconToggle, ThemeSwitch, Scroll |
 
 ## D1 – Foundations (before many more widgets)
 
@@ -39,9 +39,11 @@ Without these, every widget after Field and Checkbox would be built twice.
   nodes and accessibility nodes follow, focus moves on when the focused widget goes. `Show` (when) and `For`
   (keyed lists) as SolidJS has them. Layout-transparent like CSS `display: contents`. Example: `todo`;
   `tests/todo-demo.sh` also checks that filling and emptying a list doesn't grow memory.
-- [ ] **M** **Scrolling.** A scroll container: pixel deltas from touchpads, wheel steps, momentum (Wayland
-  compositors don't provide it, GTK doesn't either – implement it once), Kiesel's overlay scrollbar, PageUp/Down,
-  Home/End, focus scrolled into view. Redraw: the viewport is damaged as a whole; measure before optimising.
+- [x] **M** **Scrolling.** `Scroll`: touchpads 1:1 with momentum after the lift (τ 325 ms), wheel steps of
+  `viewport^(2/3)` animated, PageUp/Down, arrows, Home/End bubbling from the focused widget, focus and
+  AT-SPI scrollTo revealing widgets, Kiesel's overlay scrollbar (thin while scrolling, wide under the pointer,
+  draggable, fading out). Scroll frames only re-place (no measuring) and redraw the viewport; at 4K a momentum
+  frame takes ~8 ms. Example: `list`.
 - [ ] **M** **Popups.** Second surfaces anchored to a widget – winit's popups (xdg_popup on Wayland: they may leave
   the window, the compositor flips and slides them). The shell gets more than one surface: input, focus and
   Escape per popup, dismissal on outside click. Menus, Select, Combobox, Tooltip and DateField sit on this.

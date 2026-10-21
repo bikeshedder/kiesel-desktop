@@ -208,6 +208,12 @@ impl Widget for Button {
     }
 
     fn event(&mut self, cx: &mut EventCx<'_>, event: &Event) {
+        // Space and Enter press it; other keys go on to the ancestors
+        if let Event::KeyDown { key, .. } | Event::KeyUp { key } = event
+            && (is_space(key) || matches!(key, Key::Named(NamedKey::Enter)))
+        {
+            cx.handled = true;
+        }
         match event {
             Event::PointerEnter => self.hovered = true,
             Event::PointerLeave => self.hovered = false,

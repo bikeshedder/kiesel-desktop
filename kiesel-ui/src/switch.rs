@@ -192,6 +192,12 @@ impl Widget for Switch {
 
     fn event(&mut self, cx: &mut EventCx<'_>, event: &Event) {
         let space = |k: &Key| matches!(k, Key::Character(c) if c == " ");
+        // Space toggles; other keys go on to the ancestors
+        if let Event::KeyDown { key, .. } | Event::KeyUp { key } = event
+            && space(key)
+        {
+            cx.handled = true;
+        }
         match event {
             Event::PointerEnter => self.hovered = true,
             Event::PointerLeave => self.hovered = false,

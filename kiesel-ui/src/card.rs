@@ -11,6 +11,7 @@ pub struct Card {
     id: WidgetId,
     children: Vec<Box<dyn Widget>>,
     max_width: Option<f64>,
+    grow: bool,
     bounds: Rect,
 }
 
@@ -20,12 +21,19 @@ impl Card {
             id: WidgetId::next(),
             children: Vec::new(),
             max_width: None,
+            grow: false,
             bounds: Rect::ZERO,
         }
     }
 
     pub fn child(mut self, child: impl Widget + 'static) -> Self {
         self.children.push(Box::new(child));
+        self
+    }
+
+    /// Take the free height of the parent column, so a `Scroll` inside can fill it
+    pub fn grow(mut self) -> Self {
+        self.grow = true;
         self
     }
 
@@ -75,6 +83,10 @@ impl Widget for Card {
             },
             ..Default::default()
         };
+        if self.grow {
+            style.flex_grow = 1.0;
+            style.min_size.height = taffy::LengthPercentageAuto::length(0.0);
+        }
         if let Some(w) = self.max_width {
             style.max_size.width = taffy::LengthPercentageAuto::length(w as f32);
             // a card with a maximum fills up to it, like a block element

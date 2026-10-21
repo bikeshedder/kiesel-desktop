@@ -199,6 +199,12 @@ impl Widget for IconToggle {
 
     fn event(&mut self, cx: &mut EventCx<'_>, event: &Event) {
         let space = |k: &Key| matches!(k, Key::Character(c) if c == " ");
+        // Space and Enter press it; other keys go on to the ancestors
+        if let Event::KeyDown { key, .. } | Event::KeyUp { key } = event
+            && (space(key) || matches!(key, Key::Named(NamedKey::Enter)))
+        {
+            cx.handled = true;
+        }
         match event {
             Event::PointerEnter => self.hovered = true,
             Event::PointerLeave => self.hovered = false,

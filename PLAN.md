@@ -39,7 +39,9 @@ A change of scheme cross-fades the whole window for 300 ms (about 18 full frames
 Full-window frames (release, measured headless; `KIESEL_STATS` breaks a frame into wait, paint, raster, copy,
 present): 2560×1600 ~4 ms, 3840×2160 ~13 ms – scene 0.6 ms, rasterizing ~9 ms, conversion into the window's
 pixel format ~3 ms. That fits 60 Hz, not 120 Hz: two passes over every pixel are the floor of a CPU renderer,
-and vello_cpu's worker threads saved ~25 % for 8–16 extra threads. 120 Hz is for the GPU renderer
+and vello_cpu's worker threads saved ~25 % for 8–16 extra threads.
+Clips are non-isolated (`push_clip_rect`/`push_clip_path`): an isolated clip layer around a scroll viewport cost
+half of a 4K scroll frame (12.5 → 7.9 ms with the change). 120 Hz is for the GPU renderer
 ([ROADMAP.md](ROADMAP.md) D5). Debug builds optimize dependencies (opt-level 3) and kiesel-ui (opt-level 1),
 or a full frame would take 170–360 ms.
 
@@ -57,7 +59,7 @@ kiesel-headless start --size 1280x800 --scale 2
 kiesel-headless run cargo run --example button
 kiesel-headless shot out.png          # grim
 kiesel-headless move 640 400          # logical coordinates (tools/kiesel-input)
-kiesel-headless click 640 400         # also: down, up, scroll <dy>
+kiesel-headless click 640 400         # also: down, up; wheel <notches>, swipe <dy> (touchpad)
 kiesel-headless key shift+Tab         # also: keydown, keyup, type <text> (us layout)
 kiesel-headless ime preedit ありが     # act as the input method: also commit, clear, delete <b> <a>
 kiesel-headless a11y                  # AT-SPI tree
@@ -72,6 +74,8 @@ and 2 – and finds the buttons through the accessibility tree, not by coordinat
 wrapping on resize, that animation frames redraw only a small region, and that partial redraws match full ones
 (`KIESEL_FULL_REDRAW=1`) within ±2 per channel – the same pixel can round one step apart at another origin.
 
+`tests/list-demo.sh` scrolls by wheel, touchpad (momentum), keys and scrollbar, and checks AT-SPI scrollTo;
+`tests/todo-demo.sh` adds and removes widgets at runtime and watches memory.
 `tests/theme-demo.sh` follows a (fake) system preference, chooses, saves and restores the theme.
 `tests/form-demo.sh` covers text input: keyboard editing, pointer selection, the Wayland clipboard both ways,
 the input method (on only while a field is focused), AT-SPI Text/EditableText, and the caret's frame cost.

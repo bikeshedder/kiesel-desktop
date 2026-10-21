@@ -19,7 +19,7 @@ use parley::editing::{Cursor, PlainEditor, Selection};
 use parley::{FontFamily, FontWeight, LineHeight, StyleProperty};
 use reactive_graph::signal::ArcRwSignal;
 use reactive_graph::traits::{Set, Track, WithUntracked};
-use vello_cpu::kurbo::{Point, Rect, Shape, Size};
+use vello_cpu::kurbo::{Point, Rect, Size};
 use winit::cursor::CursorIcon;
 use winit::keyboard::{Key, NamedKey};
 
@@ -499,6 +499,7 @@ impl Widget for TextField {
             }
             Event::KeyDown { key, text, .. } => {
                 if self.key(cx, key, text.as_deref()) {
+                    cx.handled = true;
                     self.edited(cx);
                 }
             }
@@ -632,7 +633,7 @@ impl Widget for TextField {
             return;
         };
         let origin = self.text_origin();
-        ctx.push_clip_layer(&self.viewport().to_path(paint::TOLERANCE));
+        ctx.push_clip_rect(&self.viewport());
         let at = |b: parley::BoundingBox| Rect::new(b.x0, b.y0, b.x1, b.y1) + origin.to_vec2();
         if self.focused {
             ctx.set_paint(theme.accent_soft);
@@ -667,7 +668,7 @@ impl Widget for TextField {
             ctx.set_paint(theme.text_1);
             ctx.fill_rect(&at(b));
         }
-        ctx.pop_layer();
+        ctx.pop_clip();
     }
 }
 
@@ -731,6 +732,7 @@ mod tests {
                 clipboard: &mut self.clipboard,
                 modifiers,
                 clicks: 1,
+                handled: false,
             };
             self.field.event(&mut cx, &event);
         }

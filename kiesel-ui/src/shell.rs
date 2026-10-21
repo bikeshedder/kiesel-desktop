@@ -28,13 +28,14 @@ use std::time::Instant;
 
 use raw_window_handle::HasDisplayHandle;
 use softbuffer::{Context, Surface};
-use vello_cpu::kurbo::{Affine, Point, Rect, Size};
+use vello_cpu::kurbo::{Affine, Point, Rect, Size, Vec2};
 use vello_cpu::{Pixmap, RenderContext, Resources};
 use winit::application::ApplicationHandler;
 use winit::cursor::{Cursor, CursorIcon};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{
-    ButtonSource, ElementState, Ime as WinitIme, KeyEvent, MouseButton, WindowEvent,
+    ButtonSource, ElementState, Ime as WinitIme, KeyEvent, MouseButton, MouseScrollDelta,
+    TouchPhase, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -53,7 +54,8 @@ use crate::text::Text;
 use crate::theme::{Appearance, Scheme, Theme};
 use crate::theming::{ThemeMode, Theming};
 use crate::widget::{
-    self, Event, EventCx, Ime, LayoutCx, PaintCx, Widget, WidgetId, accessibility_nodes,
+    self, Event, EventCx, Ime, LayoutCx, PaintCx, ScrollDelta, Widget, WidgetId,
+    accessibility_nodes,
 };
 use reactive_graph::traits::{GetUntracked, Track};
 
@@ -86,8 +88,10 @@ struct Fade {
     start: Instant,
 }
 
-/// Regions above this share of the window are rendered straight into the buffer
-const PARTIAL_MAX: f64 = 0.5;
+/// Regions above this share of the window are rendered straight into the buffer;
+/// below it, rendering just the region and copying it is cheaper (a scroll
+/// view's viewport is often half the window)
+const PARTIAL_MAX: f64 = 0.8;
 /// Damage of this many past frames is kept for buffer ages
 const HISTORY: usize = 4;
 
@@ -132,6 +136,9 @@ pub fn run(
         last_frame: None,
         // KIESEL_FULL_REDRAW=1 redraws everything every frame (to compare against)
         always_full: std::env::var_os("KIESEL_FULL_REDRAW").is_some(),
+        needs_place: false,
+        handled: false,
+        a11y_stale: false,
         pointer: None,
         hovered: None,
         captured: None,
@@ -184,6 +191,12 @@ struct Shell {
     /// When the last frame started (for KIESEL_STATS)
     last_frame: Option<Instant>,
     always_full: bool,
+    /// Children moved (scrolling): place them again
+    needs_place: bool,
+    /// Whether the last widget sent an event handled it
+    handled: bool,
+    /// Positions changed in animation frames since the accessibility tree was built
+    a11y_stale: bool,
     /// Last pointer position (logical)
     pointer: Option<Point>,
     hovered: Option<WidgetId>,
@@ -250,6 +263,7 @@ impl Shell {
             clipboard: &mut self.clipboard,
             modifiers: self.modifiers,
             clicks: self.clicks,
+            handled: false,
         };
         match widget::find_mut(self.root.as_mut(), id) {
             Some(w) => {
@@ -257,21 +271,43 @@ impl Shell {
                 if !self.touched.contains(&id) {
                     self.touched.push(id);
                 }
+                self.handled = cx.handled;
                 true
             }
             None => false,
         }
     }
 
+    /// Sends `event` to `target`, then to its ancestors until one handles it
+    /// (keys a widget doesn't use, scrolling); true if one did
+    fn send_bubbling(&mut self, target: WidgetId, event: Event) -> bool {
+        let Some(path) = widget::path(self.root.as_ref(), target) else {
+            return false;
+        };
+        for id in path.into_iter().rev() {
+            if self.send(id, event.clone()) && self.handled {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Asks the widgets that got events or whose signals changed what changed;
     /// returns the ids needing layout
     fn collect_updates(&mut self) -> Vec<WidgetId> {
-        let (mut relayout, mut repaint) = (Vec::new(), Vec::new());
         let mut ids = std::mem::take(&mut self.touched);
         ids.extend(self.inbox.take());
         if ids.contains(&WidgetId::WINDOW) {
             self.follow_scheme();
         }
+        self.update_ids(ids)
+    }
+
+    /// Updates these widgets (all of them at the start); returns those that
+    /// need layout – those whose children moved are noted in `needs_place`
+    fn update_ids(&mut self, ids: Vec<WidgetId>) -> Vec<WidgetId> {
+        let (mut relayout, mut repaint) = (Vec::new(), Vec::new());
+        let mut place = false;
         let mut cx = LayoutCx {
             theme: &self.theme,
             text: &mut self.text,
@@ -289,6 +325,7 @@ impl Shell {
                 if change.layout {
                     relayout.push(id);
                 }
+                place |= change.place;
                 if change.paint {
                     repaint.push(w.ink());
                 }
@@ -297,22 +334,47 @@ impl Shell {
         for r in repaint {
             self.add_damage(r);
         }
+        self.needs_place |= place;
         relayout
     }
 
     /// Lays out again; whatever moved or resized is damaged where it was and where it is
     fn relayout(&mut self, dirty: &[WidgetId]) {
-        let (mut before, mut after) = (HashMap::new(), HashMap::new());
-        widget::inks(self.root.as_ref(), &mut before);
         let size = self.logical_size();
-        let mut cx = LayoutCx {
-            theme: &self.theme,
-            text: &mut self.text,
-            now: Instant::now(),
-            inbox: &self.inbox,
-        };
-        self.layout.run(self.root.as_mut(), &mut cx, size, dirty);
-        widget::inks(self.root.as_ref(), &mut after);
+        self.moving(|shell| {
+            let mut cx = LayoutCx {
+                theme: &shell.theme,
+                text: &mut shell.text,
+                now: Instant::now(),
+                inbox: &shell.inbox,
+            };
+            shell.layout.run(shell.root.as_mut(), &mut cx, size, dirty);
+        });
+        self.needs_layout = false;
+        self.needs_place = false;
+    }
+
+    /// Places widgets again after scrolling – no measuring
+    fn reposition(&mut self) {
+        self.moving(|shell| {
+            let mut cx = LayoutCx {
+                theme: &shell.theme,
+                text: &mut shell.text,
+                now: Instant::now(),
+                inbox: &shell.inbox,
+            };
+            shell.layout.place(shell.root.as_mut(), &mut cx);
+        });
+        self.needs_place = false;
+    }
+
+    /// Runs `f`, then damages whatever moved or resized where it was and where it is
+    /// (as far as it can be seen – scrolled-away content is clipped)
+    fn moving(&mut self, f: impl FnOnce(&mut Self)) {
+        let (mut before, mut after) = (HashMap::new(), HashMap::new());
+        widget::inks(self.root.as_ref(), None, &mut before);
+        f(self);
+        widget::inks(self.root.as_ref(), None, &mut after);
         for (id, ink) in &after {
             let old = before.remove(id);
             if old != Some(*ink) {
@@ -325,7 +387,6 @@ impl Shell {
         for gone in before.into_values() {
             self.add_damage(gone);
         }
-        self.needs_layout = false;
     }
 
     /// After input or a size change: pick up changes (signals, widget state),
@@ -339,6 +400,8 @@ impl Shell {
         let dirty = self.collect_updates();
         if self.needs_layout || !dirty.is_empty() {
             self.relayout(&dirty);
+        } else if self.needs_place {
+            self.reposition();
         }
         self.forget_removed(order_before);
         if let Some(p) = self.pointer {
@@ -551,6 +614,9 @@ impl Shell {
         let down = event.state == ElementState::Pressed;
         if down && matches!(event.logical_key, Key::Named(NamedKey::Tab)) {
             self.move_focus(self.modifiers.shift_key());
+            if let Some(f) = self.focused {
+                self.reveal(f);
+            }
             self.changed();
             return;
         }
@@ -580,8 +646,39 @@ impl Shell {
                 key: event.logical_key,
             }
         };
-        self.send(focused, ev);
+        // keys the focused widget doesn't use go to its ancestors (PageDown to a scroll view)
+        self.send_bubbling(focused, ev);
         self.changed();
+    }
+
+    /// Wheel and touchpad: to the widget under the pointer, up until one scrolls
+    fn scroll(&mut self, delta: ScrollDelta) {
+        let Some(target) = self.hovered.or(Some(self.root.id())) else {
+            return;
+        };
+        self.send_bubbling(target, Event::Scroll(delta));
+        self.changed();
+    }
+
+    /// Scrolls every scroll view around `id` so that it is in view (focus moved
+    /// there from the keyboard, or assistive technology asked)
+    fn reveal(&mut self, id: WidgetId) {
+        let Some(path) = widget::path(self.root.as_ref(), id) else {
+            return;
+        };
+        for ancestor in path.iter().rev().skip(1) {
+            let Some(rect) =
+                widget::find(self.root.as_ref(), id).map(|w| w.bounds().inflate(8.0, 8.0))
+            else {
+                return;
+            };
+            let moved =
+                widget::find_mut(self.root.as_mut(), *ancestor).is_some_and(|w| w.reveal(rect));
+            if moved {
+                // place before the next (outer) one looks at where it is now
+                self.reposition();
+            }
+        }
     }
 
     fn accessibility_action(&mut self, request: accesskit::ActionRequest) {
@@ -606,8 +703,10 @@ impl Shell {
                 let focusable = widget::find(self.root.as_ref(), id).is_some_and(|w| w.focusable());
                 if focusable {
                     self.set_focus(Some(id), true);
+                    self.reveal(id);
                 }
             }
+            accesskit::Action::ScrollIntoView => self.reveal(id),
             _ => return,
         }
         self.changed();
@@ -702,8 +801,28 @@ impl Shell {
         }
         // animating widgets need their ink redrawn – and those that animated
         // last frame once more, so a transition that just ended shows its end
-        let mut animating = Vec::new();
-        widget::animating_inks(self.root.as_ref(), now, &self.theme, &mut animating);
+        let mut moving = Vec::new();
+        widget::animating(self.root.as_ref(), now, &self.theme, None, &mut moving);
+        // animations that move children (scrolling, momentum) report it from
+        // update(); place them before this frame is painted
+        let ids: Vec<WidgetId> = moving.iter().map(|(id, _)| *id).collect();
+        let mut placed = false;
+        if !ids.is_empty() {
+            self.update_ids(ids);
+            if self.needs_place {
+                self.reposition();
+                placed = true;
+            }
+        }
+        // assistive technology learns the new positions once things stop moving
+        // (the first frame without placing) – not 60 times a second
+        if placed {
+            self.a11y_stale = true;
+        } else if self.a11y_stale {
+            self.a11y_stale = false;
+            self.update_accessibility();
+        }
+        let animating: Vec<Rect> = moving.into_iter().map(|(_, r)| r).collect();
         for r in std::mem::replace(&mut self.animating, animating.clone()) {
             self.add_damage(r);
         }
@@ -988,6 +1107,21 @@ impl ApplicationHandler for Shell {
             WindowEvent::PointerMoved { position, .. }
             | WindowEvent::PointerEntered { position, .. } => self.pointer_move(logical(position)),
             WindowEvent::PointerLeft { .. } => self.pointer_leave(),
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                // winit: positive = towards the start; ours: positive = towards the end
+                match delta {
+                    MouseScrollDelta::LineDelta(x, y) => {
+                        self.scroll(ScrollDelta::Lines(Vec2::new(-f64::from(x), -f64::from(y))));
+                    }
+                    MouseScrollDelta::PixelDelta(p) if p.x != 0.0 || p.y != 0.0 => {
+                        self.scroll(ScrollDelta::Pixels(Vec2::new(-p.x / scale, -p.y / scale)));
+                    }
+                    _ => {}
+                }
+                if phase == TouchPhase::Ended {
+                    self.scroll(ScrollDelta::Lifted);
+                }
+            }
             WindowEvent::PointerButton {
                 state,
                 position,

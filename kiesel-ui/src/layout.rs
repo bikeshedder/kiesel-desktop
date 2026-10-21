@@ -147,6 +147,12 @@ impl Layout {
         node
     }
 
+    /// Places the widgets again from the last layout – after scrolling, which
+    /// moves children without changing any size
+    pub fn place(&self, root: &mut dyn Widget, cx: &mut LayoutCx<'_>) {
+        self.apply(root, cx, Point::ZERO);
+    }
+
     fn apply(&self, w: &mut dyn Widget, cx: &mut LayoutCx<'_>, parent: Point) {
         if w.layout_transparent() {
             // the children are placed in the parent; this one covers them
@@ -169,8 +175,16 @@ impl Layout {
         let origin = parent + (f64::from(l.location.x), f64::from(l.location.y));
         let size = Size::new(f64::from(l.size.width), f64::from(l.size.height));
         w.set_bounds(cx, Rect::from_origin_size(origin, size));
+        // a scrolled widget moves its children up and left
+        let inner = origin - w.content_offset();
         for child in w.children_mut() {
-            self.apply(child.as_mut(), cx, origin);
+            self.apply(child.as_mut(), cx, inner);
+        }
+        if w.children_placed() {
+            let inner = origin - w.content_offset();
+            for child in w.children_mut() {
+                self.apply(child.as_mut(), cx, inner);
+            }
         }
     }
 }

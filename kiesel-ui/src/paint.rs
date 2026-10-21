@@ -66,7 +66,8 @@ pub fn inset_shadows(
     if shadows.is_empty() {
         return;
     }
-    ctx.push_clip_layer(&rounded(rect, radius));
+    // non-isolated: the shadows are plain fills, masked as they are drawn
+    ctx.push_clip_path(&rounded(rect, radius));
     for (s, color) in shadows {
         ctx.set_paint(color);
         let hole = (rect + Vec2::new(s.x, s.y)).inflate(-s.spread, -s.spread);
@@ -90,7 +91,7 @@ pub fn inset_shadows(
             ctx.fill_blurred_rounded_rect(&hole, radius as f32, sigma as f32, true);
         }
     }
-    ctx.pop_layer();
+    ctx.pop_clip();
 }
 
 /// Interpolates two shadow lists of the same shape, as a CSS transition does
