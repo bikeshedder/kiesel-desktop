@@ -5,7 +5,10 @@
 #   kiesel-headless run <cmd> [args…]                     run a command inside the session
 #   kiesel-headless env                                   print exports (eval "$(kiesel-headless env)")
 #   kiesel-headless shot [file.png]                       screenshot of the whole output
-#   kiesel-headless click <x> <y> [left|right|middle]     move the pointer to logical x,y and click
+#   kiesel-headless move <x> <y>                          move the pointer to logical x,y
+#   kiesel-headless click <x> <y> [left|right|middle]     move there and click
+#   kiesel-headless down|up [button]                      press / release (drag, hold)
+#   kiesel-headless scroll <dy>                           vertical scroll in logical pixels
 #   kiesel-headless key <wtype args…>                     type text / keys (e.g. -k Return)
 #   kiesel-headless a11y                                  dump the AT-SPI tree of running apps
 #   kiesel-headless stop
@@ -19,6 +22,7 @@ set -euo pipefail
 RUN_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}"
 STATE="$RUN_DIR/kiesel-headless"
 OUTPUT=HEADLESS-1
+WORKSPACE="${KIESEL_WORKSPACE:-/workspaces/kiesel-desktop}"
 
 die() { echo "kiesel-headless: $*" >&2; exit 1; }
 running() { [[ -f "$STATE/env" ]] && kill -0 "$(cat "$STATE/sway.pid" 2>/dev/null)" 2>/dev/null; }
@@ -73,6 +77,15 @@ EOF
   for _ in $(seq 100); do [[ -s "$STATE/sway.env" ]] && break; sleep 0.1; done
   [[ -s "$STATE/sway.env" ]] || { cat "$STATE/sway.log" >&2; stop; die "sway did not come up"; }
 
+  # One virtual pointer for the whole session (tools/kiesel-input): a pointer
+  # per command (wlrctl) appears and vanishes before clients can bind it
+  local input="$WORKSPACE/target/debug/kiesel-input"
+  [[ -x "$input" ]] || cargo build -q --manifest-path "$WORKSPACE/Cargo.toml" -p kiesel-input
+  mkfifo "$STATE/pointer.in" "$STATE/pointer.ack"
+  env -u DISPLAY XDG_RUNTIME_DIR="$RUN_DIR" $(cat "$STATE/sway.env") \
+    "$input" "${size%x*}" "${size#*x}" "$STATE/pointer.in" "$STATE/pointer.ack" >"$STATE/input.log" 2>&1 &
+  echo $! >"$STATE/input.pid"
+
   {
     echo "XDG_RUNTIME_DIR=$RUN_DIR"
     cat "$STATE/sway.env"
@@ -85,10 +98,22 @@ EOF
 }
 
 stop() {
-  for p in sway atspi dbus; do
+  for p in input sway atspi dbus; do
     [[ -f "$STATE/$p.pid" ]] && kill "$(cat "$STATE/$p.pid")" 2>/dev/null || true
   done
-  rm -f "$STATE"/*.pid "$STATE/env" "$STATE/sway.env"
+  rm -f "$STATE"/*.pid "$STATE/env" "$STATE/sway.env" "$STATE"/pointer.*
+}
+
+# Sends one command to kiesel-input and waits until it has been delivered
+pointer() {
+  need
+  kill -0 "$(cat "$STATE/input.pid" 2>/dev/null)" 2>/dev/null || die "kiesel-input is not running (see $STATE/input.log)"
+  exec 3<>"$STATE/pointer.ack"
+  echo "$*" >"$STATE/pointer.in"
+  local reply
+  read -r -t 5 reply <&3 || die "no answer from kiesel-input"
+  exec 3>&-
+  [[ "$reply" == ok ]] || die "$reply"
 }
 
 cmd="${1:-}"; shift || true
@@ -99,14 +124,10 @@ case "$cmd" in
   run) load; exec "$@" ;;
   shot) load; exec grim -o "$OUTPUT" "${1:-shot.png}" ;;
   key) load; exec wtype "$@" ;;
-  click)
-    load
-    [[ $# -ge 2 ]] || die "click <x> <y> [button]"
-    # wlrctl moves relatively: park the pointer in the top-left corner first
-    wlrctl pointer move -100000 -100000
-    wlrctl pointer move "$1" "$2"
-    wlrctl pointer click "${3:-left}"
-    ;;
+  move) [[ $# -eq 2 ]] || die "move <x> <y>"; pointer move "$@" ;;
+  click) [[ $# -ge 2 ]] || die "click <x> <y> [button]"; pointer click "$@" ;;
+  down | up) pointer "$cmd" "$@" ;;
+  scroll) [[ $# -eq 1 ]] || die "scroll <dy>"; pointer scroll "$1" ;;
   a11y)
     load
     exec python3 - <<'EOF'
@@ -123,5 +144,5 @@ def walk(acc, depth=0):
 walk(pyatspi.Registry.getDesktop(0))
 EOF
     ;;
-  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
+  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
 esac

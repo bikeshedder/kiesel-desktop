@@ -1,0 +1,11 @@
+[package]
+name = "kiesel-input"
+version = "0.0.0"
+description = "Persistent virtual pointer for kiesel-headless (wlr-virtual-pointer)"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }

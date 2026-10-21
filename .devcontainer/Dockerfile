@@ -38,4 +38,5 @@ RUN cargo install --locked cargo-deny \
 # it links its forwarded Wayland socket in there
 RUN install -d -m 700 -o vscode -g vscode /tmp/runtime-vscode
 
-COPY kiesel-headless /usr/local/bin/kiesel-headless
+# Linked, not copied: the script lives in the repository and changes with it
+RUN ln -s /workspaces/kiesel-desktop/.devcontainer/kiesel-headless /usr/local/bin/kiesel-headless
