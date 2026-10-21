@@ -1,0 +1,15 @@
+[package]
+name = "kiesel-ui"
+version = "0.1.0"
+description = "Kiesel Soft UI as a native Rust toolkit"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+winit = { version = "=0.31.0-beta.3", default-features = false, features = ["wayland", "wayland-dlopen", "wayland-csd-adwaita", "x11"] }
+softbuffer = { version = "0.4.8", default-features = false, features = ["wayland", "wayland-dlopen", "x11", "x11-dlopen"] }
+vello_cpu = "0.3"
+parley = "0.12"
+bytemuck = "1"

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["tools/kiesel-input"]
+members = ["kiesel-ui", "tools/kiesel-input"]
 exclude = ["tools/memprobe"]
 
 [workspace.package]
