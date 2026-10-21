@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # kiesel-headless – a private headless Wayland session for tests and screenshots.
 #
-#   kiesel-headless start [--size 1280x800] [--scale 1]   start sway + D-Bus + AT-SPI
+#   kiesel-headless start [--size 1280x800] [--scale 1] [--refresh 60]
+#                                                         start sway + D-Bus + AT-SPI
 #   kiesel-headless run <cmd> [args…]                     run a command inside the session
 #   kiesel-headless env                                   print exports (eval "$(kiesel-headless env)")
 #   kiesel-headless shot [file.png]                       screenshot of the whole output
@@ -45,11 +46,12 @@ need() { running || die "no session – run 'kiesel-headless start' first"; }
 load() { need; set -a; source "$STATE/env"; set +a; unset DISPLAY; }
 
 start() {
-  local size=1280x800 scale=1
+  local size=1280x800 scale=1 refresh=60
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --size) size="$2"; shift 2 ;;
       --scale) scale="$2"; shift 2 ;;
+      --refresh) refresh="$2"; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -80,7 +82,7 @@ xwayland disable
 default_border none
 default_floating_border none
 focus_follows_mouse no
-output $OUTPUT resolution ${w}x${h} position 0 0 scale $scale bg #e4e8ee solid_color
+output $OUTPUT mode --custom ${w}x${h}@${refresh}Hz position 0 0 scale $scale bg #e4e8ee solid_color
 seat * hide_cursor 0
 exec sh -c 'printf "WAYLAND_DISPLAY=%s\nSWAYSOCK=%s\n" "\$WAYLAND_DISPLAY" "\$SWAYSOCK" > "$STATE/sway.env"'
 EOF
@@ -110,7 +112,7 @@ EOF
     echo "WINIT_UNIX_BACKEND=wayland"
     echo "XDG_SESSION_TYPE=wayland"
   } >"$STATE/env"
-  echo "headless session up: $size @ scale $scale = ${w}x${h} px ($(grep WAYLAND_DISPLAY "$STATE/sway.env"))"
+  echo "headless session up: $size @ scale $scale = ${w}x${h} px, ${refresh} Hz ($(grep WAYLAND_DISPLAY "$STATE/sway.env"))"
 }
 
 stop() {
@@ -239,5 +241,5 @@ else:
     sys.exit(f"unknown a11y verb {verb}")
 EOF
     ;;
-  *) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
+  *) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; [[ -z "$cmd" ]] || exit 1 ;;
 esac

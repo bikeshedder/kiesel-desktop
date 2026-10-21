@@ -711,7 +711,9 @@ impl Shell {
         };
 
         surface.window().pre_present_notify();
+        let t_acquire = Instant::now();
         let mut buffer = surface.buffer_mut().expect("softbuffer buffer");
+        let t_acquired = Instant::now();
         // the buffer still shows the frame from `age` presents ago: redraw what changed since
         let age = usize::from(buffer.age());
         let region = if age == 0 || age - 1 > self.history.len() {
@@ -730,6 +732,7 @@ impl Shell {
         }
 
         let partial = region.area() <= whole.area() * PARTIAL_MAX;
+        let (t_painted, t_rendered);
         let logical_region = region.scale_from_origin(1.0 / scale);
         let theme = &self.theme;
         let paint =
@@ -757,7 +760,9 @@ impl Shell {
                 pixmap.resize(rw, rh);
             }
             paint(ctx, &mut self.res, self.root.as_ref(), region.origin());
+            t_painted = Instant::now();
             ctx.render(&mut *pixmap, &mut self.res);
+            t_rendered = Instant::now();
             // copy into the buffer: RGBA bytes → 0RGB words
             let src = pixmap.data_as_u8_slice();
             let (x0, y0, stride) = (region.x0 as usize, region.y0 as usize, usize::from(w16));
@@ -773,11 +778,13 @@ impl Shell {
                 slot => slot.insert(RenderContext::new(w16, h16)),
             };
             paint(ctx, &mut self.res, self.root.as_ref(), Point::ZERO);
+            t_painted = Instant::now();
             let bytes: &mut [u8] = bytemuck::cast_slice_mut(&mut buffer[..]);
             let len = usize::from(w16) * usize::from(h16) * 4;
             let target =
                 vello_cpu::PixmapMut::new(w16, h16, &mut bytes[..len]).expect("buffer size");
             ctx.render(target, &mut self.res);
+            t_rendered = Instant::now();
             for px in &mut buffer[..len / 4] {
                 *px = rgba_to_0rgb(*px);
             }
@@ -788,7 +795,9 @@ impl Shell {
             width: NonZeroU32::new(frame.width() as u32).expect("non-empty"),
             height: NonZeroU32::new(frame.height() as u32).expect("non-empty"),
         };
+        let t_converted = Instant::now();
         buffer.present_with_damage(&[damage]).expect("presenting");
+        let t_presented = Instant::now();
 
         if self.stats {
             // the gap since the last frame shows the pace the compositor allows:
@@ -796,8 +805,19 @@ impl Shell {
             let gap = self.last_frame.map_or(String::from("first"), |t| {
                 format!("+{:.1} ms", start.duration_since(t).as_secs_f64() * 1e3)
             });
+            let ms = |a: Instant, b: Instant| b.duration_since(a).as_secs_f64() * 1e3;
+            // where the time went: waiting for a free buffer, building the scene,
+            // rasterizing, converting into the buffer, handing it over
+            let parts = format!(
+                "wait {:.2} paint {:.2} raster {:.2} copy {:.2} present {:.2}",
+                ms(t_acquire, t_acquired),
+                ms(t_acquired, t_painted),
+                ms(t_painted, t_rendered),
+                ms(t_rendered, t_converted),
+                ms(t_converted, t_presented),
+            );
             eprintln!(
-                "frame {}x{} @{scale}: {} {}x{} ({:.1} %, age {age}, {gap}) {:.2} ms",
+                "frame {}x{} @{scale}: {} {}x{} ({:.1} %, age {age}, {gap}, {parts}) {:.2} ms",
                 px.width,
                 px.height,
                 if partial { "partial" } else { "full" },
