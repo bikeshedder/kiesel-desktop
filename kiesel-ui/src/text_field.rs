@@ -48,6 +48,7 @@ pub struct TextField {
     watch: Option<Watch>,
     placeholder: String,
     label: String,
+    grow: bool,
     placeholder_layout: Option<parley::Layout<()>>,
     editor: PlainEditor<()>,
     /// The editor holds `value` as of the last sync (no composition)
@@ -77,6 +78,7 @@ impl TextField {
             watch: None,
             placeholder: String::new(),
             label: String::new(),
+            grow: false,
             placeholder_layout: None,
             editor: PlainEditor::new(16.0),
             synced: String::new(),
@@ -109,6 +111,12 @@ impl TextField {
     /// shows a label and names its control comes later; until then, set both.)
     pub fn label(mut self, text: impl Into<String>) -> Self {
         self.label = text.into();
+        self
+    }
+
+    /// Take the free space along the parent's row (`flex: 1`)
+    pub fn grow(mut self) -> Self {
+        self.grow = true;
         self
     }
 
@@ -386,6 +394,7 @@ impl Widget for TextField {
                 width: taffy::LengthPercentageAuto::length(0.0),
                 height: taffy::LengthPercentageAuto::auto(),
             },
+            flex_grow: if self.grow { 1.0 } else { 0.0 },
             ..Default::default()
         }
     }
@@ -704,10 +713,12 @@ mod tests {
         }
 
         fn update(&mut self) {
+            let inbox = crate::reactive::Inbox::new(|| {});
             let mut cx = LayoutCx {
                 theme: &self.theme,
                 text: &mut self.text,
                 now: Instant::now(),
+                inbox: &inbox,
             };
             self.field.update(&mut cx);
         }

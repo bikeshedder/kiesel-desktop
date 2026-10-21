@@ -34,6 +34,8 @@ const SPIN_PERIOD: f64 = 0.9;
 pub struct Button {
     id: WidgetId,
     label: String,
+    /// What assistive technology announces, if not the label
+    accessible_name: Option<String>,
     layout: Option<Layout<()>>,
     bounds: Rect,
     radius: f64,
@@ -62,6 +64,7 @@ impl Button {
         Self {
             id: WidgetId::next(),
             label: label.into(),
+            accessible_name: None,
             layout: None,
             bounds: Rect::ZERO,
             radius: 0.0,
@@ -86,6 +89,13 @@ impl Button {
     /// A value, a signal, or `ArcSignal::derive(…)`
     pub fn loading(mut self, loading: impl Into<ArcSignal<bool>>) -> Self {
         self.loading = loading.into();
+        self
+    }
+
+    /// A name for assistive technology when the label alone is ambiguous – many
+    /// "Remove" buttons in a list each say what they remove (`aria-label`)
+    pub fn accessible_name(mut self, name: impl Into<String>) -> Self {
+        self.accessible_name = Some(name.into());
         self
     }
 
@@ -253,7 +263,11 @@ impl Widget for Button {
 
     fn accessibility(&self) -> Option<accesskit::Node> {
         let mut node = accesskit::Node::new(accesskit::Role::Button);
-        node.set_label(self.label.clone());
+        node.set_label(
+            self.accessible_name
+                .clone()
+                .unwrap_or_else(|| self.label.clone()),
+        );
         node.set_bounds(accessible_rect(self.bounds));
         node.add_action(accesskit::Action::Click);
         node.add_action(accesskit::Action::Focus);

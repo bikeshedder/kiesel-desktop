@@ -5,6 +5,7 @@ pub mod anim;
 pub mod button;
 pub mod card;
 pub mod clipboard;
+pub mod control;
 pub mod flex;
 pub mod icon;
 pub mod label;
@@ -22,6 +23,7 @@ pub mod widget;
 
 pub use button::Button;
 pub use card::Card;
+pub use control::{For, Show};
 pub use flex::{Align, Flex, Justify};
 pub use label::Label;
 pub use shell::{Options, run};

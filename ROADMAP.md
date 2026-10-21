@@ -26,7 +26,7 @@ The stack, measured baselines and the headless test setup are in [PLAN.md](PLAN.
 | Rendering | vello_cpu into softbuffer, partial redraws with buffer age, Soft UI box shadows (outer, inset, spread) |
 | Layout & text | taffy (Flex stack/cluster), parley paragraphs, type scale, CJK and emoji fallback |
 | Input | pointer routing and capture, focus chain, `:focus-visible`, IME, clipboard, multi-click |
-| State | signals to the widgets that show them (any thread), timers (`wake_at`) |
+| State | signals to the widgets that show them (any thread), timers (`wake_at`), `Show` and keyed `For` |
 | Accessibility | AccessKit on AT-SPI: roles, states, actions, text runs, caret and selection |
 | Theme | light/dark/system (XDG portal), saved per app, cross-fade, Lucide icons |
 | Widgets | Button (default, loading), Label, Card, TextField, Switch, IconToggle, ThemeSwitch |
@@ -35,9 +35,10 @@ The stack, measured baselines and the headless test setup are in [PLAN.md](PLAN.
 
 Without these, every widget after Field and Checkbox would be built twice.
 
-- [ ] **M** **Changing children.** Widgets added and removed at runtime: mount and unmount (watches stop), layout
+- [x] **M** **Changing children.** Widgets added and removed at runtime: mount and unmount (watches stop), layout
   nodes and accessibility nodes follow, focus moves on when the focused widget goes. `Show` (when) and `For`
-  (keyed lists) as SolidJS has them. Today the tree is fixed after start.
+  (keyed lists) as SolidJS has them. Layout-transparent like CSS `display: contents`. Example: `todo`;
+  `tests/todo-demo.sh` also checks that filling and emptying a list doesn't grow memory.
 - [ ] **M** **Scrolling.** A scroll container: pixel deltas from touchpads, wheel steps, momentum (Wayland
   compositors don't provide it, GTK doesn't either – implement it once), Kiesel's overlay scrollbar, PageUp/Down,
   Home/End, focus scrolled into view. Redraw: the viewport is damaged as a whole; measure before optimising.

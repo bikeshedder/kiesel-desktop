@@ -4,6 +4,10 @@
 //! nodes of widgets that reported a layout change dirty, and lets taffy
 //! compute – it re-measures only dirty leaves, so unchanged text isn't shaped
 //! or broken again. The results go back to the widgets as window coordinates.
+//!
+//! Layout-transparent widgets (`Show`, `For` – like CSS `display: contents`)
+//! get no node of their own: their children's nodes join the parent's, and
+//! their bounds are the union of their children's.
 
 use std::collections::{HashMap, HashSet};
 
@@ -36,7 +40,7 @@ impl Layout {
         dirty: &[WidgetId],
     ) {
         let mut seen = HashSet::new();
-        let root_node = self.sync(root, cx, &mut seen, true);
+        let root_node = self.sync_node(root, cx, &mut seen, true);
         for id in dirty {
             if let Some(&node) = self.nodes.get(id) {
                 self.tree.mark_dirty(node).expect("node exists");
@@ -80,7 +84,24 @@ impl Layout {
         self.apply(root, cx, Point::ZERO);
     }
 
+    /// The nodes `w` puts into its parent: its own, or its children's if it is transparent
     fn sync(
+        &mut self,
+        w: &dyn Widget,
+        cx: &LayoutCx<'_>,
+        seen: &mut HashSet<WidgetId>,
+    ) -> Vec<NodeId> {
+        if w.layout_transparent() {
+            return w
+                .children()
+                .iter()
+                .flat_map(|c| self.sync(c.as_ref(), cx, seen))
+                .collect();
+        }
+        vec![self.sync_node(w, cx, seen, false)]
+    }
+
+    fn sync_node(
         &mut self,
         w: &dyn Widget,
         cx: &LayoutCx<'_>,
@@ -90,7 +111,7 @@ impl Layout {
         let children: Vec<NodeId> = w
             .children()
             .iter()
-            .map(|c| self.sync(c.as_ref(), cx, seen, false))
+            .flat_map(|c| self.sync(c.as_ref(), cx, seen))
             .collect();
         let mut style = w.style(cx.theme);
         if is_root {
@@ -127,6 +148,20 @@ impl Layout {
     }
 
     fn apply(&self, w: &mut dyn Widget, cx: &mut LayoutCx<'_>, parent: Point) {
+        if w.layout_transparent() {
+            // the children are placed in the parent; this one covers them
+            let mut union: Option<Rect> = None;
+            for child in w.children_mut() {
+                self.apply(child.as_mut(), cx, parent);
+                let b = child.bounds();
+                union = Some(union.map_or(b, |u| u.union(b)));
+            }
+            w.set_bounds(
+                cx,
+                union.unwrap_or(Rect::from_origin_size(parent, Size::ZERO)),
+            );
+            return;
+        }
         let Some(&node) = self.nodes.get(&w.id()) else {
             return;
         };

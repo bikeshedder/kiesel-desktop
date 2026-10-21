@@ -276,6 +276,7 @@ impl Shell {
             theme: &self.theme,
             text: &mut self.text,
             now: Instant::now(),
+            inbox: &self.inbox,
         };
         if std::mem::take(&mut self.update_everything) {
             widget::update_all(self.root.as_mut(), &mut cx, &mut relayout, &mut repaint);
@@ -308,6 +309,7 @@ impl Shell {
             theme: &self.theme,
             text: &mut self.text,
             now: Instant::now(),
+            inbox: &self.inbox,
         };
         self.layout.run(self.root.as_mut(), &mut cx, size, dirty);
         widget::inks(self.root.as_ref(), &mut after);
@@ -330,10 +332,15 @@ impl Shell {
     /// lay out if needed, update hover, cursor and the accessibility tree,
     /// and ask for a frame if anything needs drawing
     fn changed(&mut self) {
+        // widgets may go away in this update: remember where focus was in the order
+        let order_before = self
+            .focused
+            .map(|_| widget::focus_order(self.root.as_ref()));
         let dirty = self.collect_updates();
         if self.needs_layout || !dirty.is_empty() {
             self.relayout(&dirty);
         }
+        self.forget_removed(order_before);
         if let Some(p) = self.pointer {
             // the widget under a resting pointer can change with layout
             self.update_hover(p);
@@ -354,6 +361,39 @@ impl Shell {
         if self.damage.is_some() || self.full_damage {
             self.request_redraw();
         }
+    }
+
+    /// Widgets removed by an update can't stay focused, hovered or captured. Focus
+    /// moves to the next focusable widget that is still there – else the previous
+    /// one, else nowhere – and stays visible if it was (GTK does the same).
+    fn forget_removed(&mut self, order_before: Option<Vec<WidgetId>>) {
+        let root = self.root.as_ref();
+        let gone = |id: &WidgetId| widget::find(root, *id).is_none();
+        if self.hovered.as_ref().is_some_and(gone) {
+            self.hovered = None;
+        }
+        if self.captured.as_ref().is_some_and(gone) {
+            self.captured = None;
+        }
+        let (Some(focused), Some(before)) = (self.focused, order_before) else {
+            return;
+        };
+        if !gone(&focused) {
+            return;
+        }
+        let now = widget::focus_order(root);
+        let at = before.iter().position(|&id| id == focused).unwrap_or(0);
+        let next = before[at + 1..]
+            .iter()
+            .chain(before[..at].iter().rev())
+            .find(|id| now.contains(id))
+            .copied();
+        // the old one is gone: nobody to tell it lost focus
+        self.focused = None;
+        let visible = self.focus_visible;
+        self.focus_visible = false;
+        self.set_focus(next, visible);
+        self.collect_updates();
     }
 
     /// The input method is on while a widget that takes text is focused, its

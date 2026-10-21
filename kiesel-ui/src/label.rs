@@ -98,6 +98,10 @@ impl Widget for Label {
     }
 
     fn measure(&mut self, cx: &mut LayoutCx<'_>, known: Known, available: Available) -> Size {
+        if self.shown.is_empty() {
+            // like an empty paragraph on the web: no box at all
+            return Size::ZERO;
+        }
         let widths = self.layout(cx).calculate_content_widths();
         let width = known.width.unwrap_or(match available.width {
             taffy::AvailableSpace::MinContent => widths.min,
@@ -137,7 +141,11 @@ impl Widget for Label {
         }
     }
 
+    /// Empty text says nothing: it stays out of the tree
     fn accessibility(&self) -> Option<accesskit::Node> {
+        if self.shown.is_empty() {
+            return None;
+        }
         let mut node = accesskit::Node::new(accesskit::Role::Label);
         node.set_value(self.shown.clone());
         node.set_bounds(crate::widget::accessible_rect(self.bounds));

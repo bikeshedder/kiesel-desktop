@@ -91,6 +91,18 @@ pub struct LayoutCx<'a> {
     pub theme: &'a Theme,
     pub text: &'a mut Text,
     pub now: Instant,
+    pub(crate) inbox: &'a std::sync::Arc<crate::reactive::Inbox>,
+}
+
+impl LayoutCx<'_> {
+    /// Brings a widget created at runtime (and its children) to life: watches
+    /// its signals and lets it read their values – call it before adding the
+    /// widget to the tree
+    pub fn mount(&mut self, w: &mut dyn Widget) {
+        mount_all(w, &mut MountCx { inbox: self.inbox });
+        let (mut relayout, mut repaint) = (Vec::new(), Vec::new());
+        update_all(w, self, &mut relayout, &mut repaint);
+    }
 }
 
 pub struct PaintCx<'a> {
@@ -176,6 +188,12 @@ pub trait Widget {
 
     fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
         &mut []
+    }
+
+    /// Takes no box of its own in layout: its children are laid out as its
+    /// parent's (CSS `display: contents`) – `Show`, `For`
+    fn layout_transparent(&self) -> bool {
+        false
     }
 
     /// Its box in layout: display, direction, gaps, padding, size limits (taffy)
@@ -413,10 +431,12 @@ pub(crate) mod tests {
     pub(crate) fn lay_out(root: &mut dyn Widget, size: Size) {
         let theme = Theme::new(Scheme::Light, &Appearance::default());
         let mut text = Text::default();
+        let inbox = crate::reactive::Inbox::new(|| {});
         let mut cx = LayoutCx {
             theme: &theme,
             text: &mut text,
             now: Instant::now(),
+            inbox: &inbox,
         };
         let (mut relayout, mut repaint) = (Vec::new(), Vec::new());
         update_all(root, &mut cx, &mut relayout, &mut repaint);
