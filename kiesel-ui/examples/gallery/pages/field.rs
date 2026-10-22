@@ -6,15 +6,15 @@
 //! "Email" checks as you type.
 //!
 //!   kiesel-headless start --scale 2
-//!   kiesel-headless run cargo run --example field
+//!   KIESEL_PAGE=field kiesel-headless run cargo run --example gallery
 
-use kiesel_ui::kurbo::Size;
+use crate::App;
 use kiesel_ui::{
-    Align, ArcRwSignal, ArcSignal, Button, Card, Field, Flex, Get, Justify, Label, Options, Set,
-    TextField, TextRole, space,
+    Align, ArcRwSignal, ArcSignal, Button, Card, Field, Flex, Get, Justify, Label, Set, TextField,
+    TextRole, space,
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn page(_app: &App) -> Flex {
     let (name, email) = (
         ArcRwSignal::new(String::new()),
         ArcRwSignal::new(String::new()),
@@ -83,17 +83,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .child(Label::new(created).role(TextRole::Caption))
                 .child(Button::new("Create account").on_click(create)),
         );
-    let root = Flex::stack()
+    Flex::stack()
         .justify(Justify::Center)
         .align(Align::Center)
         .padding(space(5))
-        .child(card);
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Fields".into(),
-            size: Size::new(520.0, 480.0),
-            ..Default::default()
-        },
-        root,
-    )
+        .child(card)
 }

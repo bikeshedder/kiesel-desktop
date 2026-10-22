@@ -6,16 +6,14 @@
 //! signals, set from that thread.
 //!
 //!   kiesel-headless start --scale 2
-//!   kiesel-headless run cargo run --example dialog
+//!   KIESEL_PAGE=dialog kiesel-headless run cargo run --example gallery
 
 use std::time::Duration;
 
-use kiesel_ui::kurbo::Size;
-use kiesel_ui::{
-    Align, ArcRwSignal, Button, Card, Flex, GetUntracked, Justify, Label, Options, Set, space,
-};
+use crate::App;
+use kiesel_ui::{Align, ArcRwSignal, Button, Card, Flex, GetUntracked, Justify, Label, Set, space};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn page(_app: &App) -> Flex {
     let saving = ArcRwSignal::new(false);
     let status = ArcRwSignal::new(String::from("Last saved 14 minutes ago"));
 
@@ -57,17 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .child(Button::new("Reset").on_click(reset))
                 .child(Button::new("Save changes").loading(saving).on_click(save)),
         );
-    let root = Flex::stack()
+    Flex::stack()
         .justify(Justify::Center)
         .align(Align::Center)
         .padding(space(5))
-        .child(card);
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Dialog".into(),
-            size: Size::new(560.0, 400.0),
-            ..Default::default()
-        },
-        root,
-    )
+        .child(card)
 }

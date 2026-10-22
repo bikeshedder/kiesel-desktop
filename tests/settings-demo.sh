@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# System settings, with examples/theme in a headless session, scale 1 and 2, all
+# System settings, with the gallery's theme page in a headless session, scale 1 and 2, all
 # served by the fake XDG portal and changed while the app runs:
 #   text scale – GNOME's text-scaling-factor 1.5 makes the text, the buttons and the
 #                field larger; back at 1 every box is as before
@@ -13,8 +13,10 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/settings-demo
 mkdir -p "$OUT"
-cargo build -q --release --example theme -p kiesel-ui
-BIN=target/release/examples/theme
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=theme
 export XDG_CONFIG_HOME="$PWD/$OUT/config"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -48,7 +50,7 @@ run_case() {
   local scale=$1
   tag="${scale}x"
   rm -rf "$XDG_CONFIG_HOME"
-  pkill -x theme || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 520x420 --scale "$scale" >/dev/null
   $H portal light
@@ -102,9 +104,9 @@ run_case() {
   b=$(frames)
   (( b - a >= 8 )) || fail "$tag: only $((b - a)) frames for the fade with motion back on"
 
-  pkill -x theme || true
+  pkill -x gallery || true
   echo "ok  $tag  (button ${bw}→${bw2} px at 1.5, green $before→$after, caption $normal→$high)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x theme || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

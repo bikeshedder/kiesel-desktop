@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Text input test for examples/form in a headless session, scale 1 and 2:
+# Text input test for the gallery's form page in a headless session, scale 1 and 2:
 #   keyboard   – Tab focuses (and selects), typing, Ctrl+Backspace, Home/Shift+End, Enter submits
 #   pointer    – a click places the caret, a double click selects a word
 #   clipboard  – Ctrl+C reaches the system clipboard, Ctrl+V takes from it (wl-copy/wl-paste)
@@ -14,8 +14,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/form-demo
 mkdir -p "$OUT"
-cargo build -q --release --example form -p kiesel-ui
-BIN=target/release/examples/form
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=form
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.3; }
@@ -30,7 +35,7 @@ frames() { grep -c '^frame' "$OUT/$tag.log" || true; }
 run_case() {
   local scale=$1
   tag="${scale}x"
-  pkill -x form || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 520x360 --scale "$scale" >/dev/null
   KIESEL_STATS=1 $H run "$BIN" >"$OUT/$tag.log" 2>&1 &
@@ -97,10 +102,10 @@ run_case() {
   sleep 8; c=$(frames); sleep 3; d=$(frames)
   (( d == c )) || fail "$tag: $((d - c)) frames in 3 s after the caret stopped blinking"
 
-  pkill -x form || true
+  pkill -x gallery || true
   pkill -x wl-copy || true  # it forked to keep serving the clipboard
   echo "ok  $tag  ($((b - a)) frames in 3 s blinking, $((d - c)) when idle)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x form || true; pkill -x wl-copy || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true; pkill -x wl-copy || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

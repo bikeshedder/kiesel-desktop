@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for examples/button in a headless session, light and dark, scale 1 and 2:
+# Smoke test for the gallery's button page in a headless session, light and dark, scale 1 and 2:
 #   pointer   – hover and press change the look; a click on "Save changes" starts
 #               loading (spinner turns, button widens), "Reset" stops it
 #   keyboard  – Tab / Shift+Tab move a visible focus ring, Space (on release) and
@@ -13,8 +13,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/button-demo
 mkdir -p "$OUT"
-cargo build -q --release --example button -p kiesel-ui
-BIN=target/release/examples/button
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=button
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 # two screenshots differ when a channel moves by more than 2: partial and full
@@ -103,11 +108,11 @@ run_case() {
   $H a11y click Reset; settle
   expect_states "Save changes" "focused" "after the AT click on Reset"
 
-  pkill -x button || true
+  pkill -x gallery || true
   echo "ok  $tag  (faces ${rest}px → ${loading}px while loading)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x button || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scheme in light dark; do
   for scale in 1 2; do run_case "$scheme" "$scale"; done
 done

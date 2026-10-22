@@ -67,7 +67,8 @@ The dev container runs a private headless sway (pixman), Mesa lavapipe/llvmpipe,
 
 ```sh
 kiesel-headless start --size 1280x800 --scale 2
-kiesel-headless run cargo run --example button
+kiesel-headless run cargo run --example gallery   # every example, one page each
+KIESEL_PAGE=button kiesel-headless run target/release/examples/gallery   # one page alone
 kiesel-headless shot out.png          # grim
 kiesel-headless move 640 400          # logical coordinates (tools/kiesel-input)
 kiesel-headless click 640 400         # also: down, up; wheel <notches>, swipe <dy> (touchpad)
@@ -86,6 +87,8 @@ and 2 – and finds the buttons through the accessibility tree, not by coordinat
 wrapping on resize, that animation frames redraw only a small region, and that partial redraws match full ones
 (`KIESEL_FULL_REDRAW=1`) within ±2 per channel – the same pixel can round one step apart at another origin.
 
+`tests/gallery-demo.sh` opens every page of the gallery twice (memory flat), and checks the theme and language
+hold across pages; the other tests open their page alone (`KIESEL_PAGE`).
 `tests/i18n-demo.sh` detects the language, formats plurals, lists and numbers, and switches at runtime;
 `tests/popover-demo.sh` opens, places and dismisses popovers and follows focus in and out;
 `tests/list-demo.sh` scrolls by wheel, touchpad (momentum), keys and scrollbar, and checks AT-SPI scrollTo;

@@ -3,15 +3,15 @@
 //! settings row (a switch at the end) and a consent that "Continue" insists on.
 //!
 //!   kiesel-headless start --scale 2
-//!   kiesel-headless run cargo run --example choices
+//!   KIESEL_PAGE=choices kiesel-headless run cargo run --example gallery
 
-use kiesel_ui::kurbo::Size;
+use crate::App;
 use kiesel_ui::{
     Align, ArcRwSignal, ArcSignal, Button, Card, Checkbox, CheckboxGroup, Choice, ControlSize,
-    Field, Flex, Get, Justify, Label, Options, RadioGroup, Scroll, Set, Switch, TextRole, space,
+    Field, Flex, Get, Justify, Label, RadioGroup, Scroll, Set, Switch, TextRole, space,
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn page(_app: &App) -> Flex {
     let plan = ArcRwSignal::new(String::new());
     let channels = ArcRwSignal::new(vec!["email".to_string()]);
     let updates = ArcRwSignal::new(true);
@@ -147,19 +147,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 })),
         );
-    let root = Scroll::new(
-        Flex::stack()
-            .justify(Justify::Center)
-            .align(Align::Center)
-            .padding(space(5))
-            .child(card),
-    );
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Choices".into(),
-            size: Size::new(560.0, 820.0),
-            ..Default::default()
-        },
-        root,
+    Flex::stack().child(
+        Scroll::new(
+            Flex::stack()
+                .justify(Justify::Center)
+                .align(Align::Center)
+                .padding(space(5))
+                .child(card),
+        )
+        .grow(),
     )
 }

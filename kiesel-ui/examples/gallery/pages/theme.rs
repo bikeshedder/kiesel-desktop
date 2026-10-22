@@ -3,16 +3,16 @@
 //!
 //!   kiesel-headless start --scale 2
 //!   kiesel-headless portal dark          # what the "system" prefers
-//!   kiesel-headless run cargo run --example theme
+//!   KIESEL_PAGE=theme kiesel-headless run cargo run --example gallery
 
-use kiesel_ui::kurbo::Size;
+use crate::App;
 use kiesel_ui::{
-    Align, ArcSignal, Button, Card, ControlSize, Flex, Get, Justify, Label, Options, Scheme, Set,
-    TextField, TextRole, ThemeMode, ThemeSwitch, Theming, space,
+    Align, ArcSignal, Button, Card, ControlSize, Flex, Get, Justify, Label, Scheme, Set, TextField,
+    TextRole, ThemeMode, ThemeSwitch, space,
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let theming = Theming::new("de.kiesel.ThemeDemo");
+pub fn page(app: &App) -> Flex {
+    let theming = app.theming.clone();
 
     let status = ArcSignal::derive({
         let (mode, system) = (theming.mode(), theming.system());
@@ -49,18 +49,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     move || mode.set(ThemeMode::System)
                 }),
             ));
-    let root = Flex::stack()
+    Flex::stack()
         .justify(Justify::Center)
         .align(Align::Center)
         .padding(space(5))
-        .child(card);
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Theme".into(),
-            size: Size::new(520.0, 400.0),
-            theming,
-            ..Default::default()
-        },
-        root,
-    )
+        .child(card)
 }

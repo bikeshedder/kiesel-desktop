@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fields, with examples/field in a headless session, scale 1 and 2:
+# Fields, with the gallery's field page in a headless session, scale 1 and 2:
 #   names     – the label names the control (AT-SPI name from labelled-by); the
 #               hint is its description; "required" only on the required field
 #   label     – a click on the label focuses the control
@@ -13,8 +13,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/field-demo
 mkdir -p "$OUT"
-cargo build -q --release --example field -p kiesel-ui
-BIN=target/release/examples/field
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=field
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.4; }
@@ -40,7 +45,7 @@ print(sum(1 for r, g, b in crop.getdata() if r > g + 60 and r > b + 40))" "$1" "
 run_case() {
   local scale=$1
   tag="${scale}x"
-  pkill -x field || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 520x480 --scale "$scale" >/dev/null
   $H run "$BIN" >"$OUT/$tag.log" 2>&1 &
@@ -78,9 +83,9 @@ run_case() {
   has "label 'Created an account for Ada'" "the form went through"
   $H shot "$OUT/$tag-done.png"
 
-  pkill -x field || true
+  pkill -x gallery || true
   echo "ok  $tag  (names, descriptions, required, label focus, errors; $reds red px in the label)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x field || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

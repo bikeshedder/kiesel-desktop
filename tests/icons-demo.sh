@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Icons, with examples/icons in a headless session, scale 1 and 2:
+# Icons, with the gallery's icons page in a headless session, scale 1 and 2:
 #   a11y      – decorative icons stay out of the tree; a labelled one is an image;
 #               icon-only buttons are named by their label
 #   layout    – icon-only buttons are square (--ksl-control); a leading icon makes a
@@ -14,8 +14,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/icons-demo
 mkdir -p "$OUT"
-cargo build -q --release --example icons -p kiesel-ui
-BIN=target/release/examples/icons
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=icons
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.4; }
@@ -36,7 +41,7 @@ print(sum(1 for r, g, b in crop.getdata() if r + g + b < 3 * 170))" "$1" "$scale
 run_case() {
   local scale=$1
   tag="${scale}x"
-  pkill -x icons || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 540x380 --scale "$scale" >/dev/null
   KIESEL_STATS=1 $H run "$BIN" >"$OUT/$tag.log" 2>&1 &
@@ -77,9 +82,9 @@ run_case() {
   sleep 0.3; a=$(frames); sleep 1; b=$(frames)
   (( a == b )) || fail "$tag: $((b - a)) frames after the spinner stopped"
 
-  pkill -x icons || true
+  pkill -x gallery || true
   echo "ok  $tag  (Save ${save} px, icon-only 40 px squares, $settings/$delete px of icon)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x icons || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

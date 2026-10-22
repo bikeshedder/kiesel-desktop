@@ -145,9 +145,12 @@ impl Flex {
         self
     }
 
-    /// Take the free space along the parent's main axis (`flex: 1`)
+    /// Take the free space along the parent's main axis (`flex: 1`) – and no
+    /// more: `min-height: 0`, so a scroll view inside scrolls instead of
+    /// stretching it
     pub fn grow(mut self) -> Self {
         self.style.flex_grow = 1.0;
+        self.style.min_size.height = taffy::LengthPercentageAuto::length(0.0);
         self
     }
 }

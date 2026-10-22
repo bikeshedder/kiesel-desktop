@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Popups, with examples/popover in a headless session, scale 1 and 2:
+# Popups, with the gallery's popover page in a headless session, scale 1 and 2:
 #   open/close – a click opens a panel below its trigger; a click outside, a click on the
 #                trigger (without reopening it), Escape and the panel's own button close it
 #   placement  – near the window's bottom a panel opens above its trigger; a panel that fits on
@@ -15,8 +15,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/popover-demo
 mkdir -p "$OUT"
-cargo build -q --release --example popover -p kiesel-ui
-BIN=target/release/examples/popover
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=popover
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.4; }   # opening 180 ms, closing 130 ms
@@ -38,7 +43,7 @@ frames() { grep -c '^frame' "$OUT/$tag.log" || true; }
 run_case() {
   local scale=$1
   tag="${scale}x"
-  pkill -x popover || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 560x440 --scale "$scale" >/dev/null
   KIESEL_STATS=1 $H run "$BIN" >"$OUT/$tag.log" 2>&1 &
@@ -97,9 +102,9 @@ run_case() {
   sleep 0.5; local a b; a=$(frames); sleep 1; b=$(frames)
   (( a == b )) || fail "$tag: $((b - a)) frames while idle"
 
-  pkill -x popover || true
+  pkill -x gallery || true
   echo "ok  $tag  (panel ${pw}x$ph px, open/close/flip/focus)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x popover || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

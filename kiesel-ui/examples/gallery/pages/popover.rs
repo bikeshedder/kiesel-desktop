@@ -4,12 +4,12 @@
 //! opens above its trigger instead.
 //!
 //!   kiesel-headless start --scale 2
-//!   kiesel-headless run cargo run --example popover
+//!   KIESEL_PAGE=popover kiesel-headless run cargo run --example gallery
 
-use kiesel_ui::kurbo::Size;
+use crate::App;
 use kiesel_ui::{
-    Align, ArcRwSignal, Button, Card, Flex, Justify, Label, Options, Placement, Popover, Set,
-    TextField, TextRole, Update, space,
+    Align, ArcRwSignal, Button, Card, Flex, Justify, Label, Placement, Popover, Set, TextField,
+    TextRole, Update, space,
 };
 
 /// A button that opens and closes `open`
@@ -18,7 +18,7 @@ fn toggle(label: &str, open: &ArcRwSignal<bool>) -> Button {
     Button::new(label).on_click(move || open.update(|o| *o = !*o))
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn page(_app: &App) -> Flex {
     let (account, info, more) = (
         ArcRwSignal::new(false),
         ArcRwSignal::new(false),
@@ -77,18 +77,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .child(
             Label::new("Click outside a panel or press Escape to close it.").role(TextRole::Body),
         );
-    let root = Flex::stack()
+    Flex::stack()
         .justify(Justify::Between)
         .align(Align::Center)
         .padding(space(5))
         .child(card)
-        .child(Popover::new(more.clone(), toggle("More", &more), more_panel).label("More"));
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Popover".into(),
-            size: Size::new(560.0, 440.0),
-            ..Default::default()
-        },
-        root,
-    )
+        .child(Popover::new(more.clone(), toggle("More", &more), more_panel).label("More"))
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shortcuts, with examples/shortcuts in a headless session, scale 1 and 2:
+# Shortcuts, with the gallery's shortcuts page in a headless session, scale 1 and 2:
 #   anywhere  – Ctrl+S presses Save without focus, and while typing in the note
 #   focus     – the focused field keeps the keys it uses (Ctrl+A selects its text)
 #   popups    – while the "More" popover is open its Ctrl+E (Archive) wins over the
@@ -14,8 +14,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/shortcuts-demo
 mkdir -p "$OUT"
-cargo build -q --release --example shortcuts -p kiesel-ui
-BIN=target/release/examples/shortcuts
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=shortcuts
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.4; }
@@ -25,7 +30,7 @@ frames() { grep -c '^frame' "$OUT/$tag.log" || true; }
 run_case() {
   local scale=$1
   tag="${scale}x"
-  pkill -x shortcuts || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 520x460 --scale "$scale" >/dev/null
   env -u KIESEL_LANG -u LC_ALL -u LC_MESSAGES -u LANGUAGE LANG=en_US.UTF-8 KIESEL_STATS=1 \
@@ -69,9 +74,9 @@ run_case() {
   sleep 0.5; local a b; a=$(frames); sleep 1; b=$(frames)
   (( a == b )) || fail "$tag: $((b - a)) frames while idle"
 
-  pkill -x shortcuts || true
+  pkill -x gallery || true
   echo "ok  $tag  (anywhere, in a field, popover first, app, labels in two languages)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x shortcuts || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

@@ -86,6 +86,8 @@ enum Look {
     Knob,
     /// The plain variant: chosen, a flat accent tint
     Plain,
+    /// The plain variant as a list, one option a row, its content at the start
+    List,
 }
 
 /// The height of a control of this size (`--ksl-control-sm` … `-lg`), and of
@@ -93,9 +95,9 @@ enum Look {
 fn height(theme: &Theme, size: ControlSize, look: Look) -> f64 {
     let scale = f64::from((theme.metrics.font_size / 16.0).max(1.0));
     match (look, size) {
-        (Look::Plain, ControlSize::Xs | ControlSize::Sm) => 24.0 * scale,
-        (Look::Plain, ControlSize::Md) => 28.0 * scale,
-        (Look::Plain, _) => 36.0 * scale,
+        (Look::Plain | Look::List, ControlSize::Xs | ControlSize::Sm) => 24.0 * scale,
+        (Look::Plain | Look::List, ControlSize::Md) => 28.0 * scale,
+        (Look::Plain | Look::List, _) => 36.0 * scale,
         (_, ControlSize::Xs | ControlSize::Sm) => theme.metrics.control * 0.8,
         (_, ControlSize::Md) => theme.metrics.control,
         (_, _) => theme.metrics.control * 1.2,
@@ -151,7 +153,7 @@ impl SegmentButton {
             _ => 17.6,
         } * theme.metrics.font_size
             / 16.0;
-        style.weight = if self.look == Look::Plain && !self.shown {
+        style.weight = if matches!(self.look, Look::Plain | Look::List) && !self.shown {
             500.0
         } else {
             600.0
@@ -161,7 +163,7 @@ impl SegmentButton {
 
     fn padding(&self) -> f64 {
         match (self.look, self.size) {
-            (Look::Plain, _) => space(2),
+            (Look::Plain | Look::List, _) => space(2),
             (_, ControlSize::Xs | ControlSize::Sm) => space(3),
             (_, ControlSize::Md) => space(4),
             _ => space(5),
@@ -214,7 +216,7 @@ impl Widget for SegmentButton {
         let mut change = Change::NONE;
         let (chosen, implied) = (self.chosen.get_untracked(), self.implied.get_untracked());
         if (chosen, implied) != (self.shown, self.shown_implied) {
-            if self.look == Look::Plain && chosen != self.shown {
+            if matches!(self.look, Look::Plain | Look::List) && chosen != self.shown {
                 // bolder when chosen: the width may change
                 self.layout = None;
                 change = Change::LAYOUT;
@@ -382,7 +384,7 @@ impl Widget for SegmentButton {
             self.hover.value(now, d) as f32,
             self.lit.value(now, d) as f32,
         );
-        let plain = self.look == Look::Plain;
+        let plain = matches!(self.look, Look::Plain | Look::List);
 
         paint::outer_shadows(
             ctx,
@@ -393,7 +395,7 @@ impl Widget for SegmentButton {
         );
         match self.look {
             Look::Knob if lit > 0.0 => knob(ctx, theme, r, rad, lit),
-            Look::Plain => {
+            Look::Plain | Look::List => {
                 // hover: a faint tint; chosen: the accent's soft tint
                 let rad = theme.metrics.radius_sm;
                 let tint = if self.shown_implied {
@@ -414,7 +416,7 @@ impl Widget for SegmentButton {
         let rest = mix(theme.text_3_sunken, theme.text_2, hover);
         let fg = match (self.look, self.shown_implied) {
             (_, true) => theme.text_1,
-            (Look::Plain, false) => mix(rest, theme.accent_2, lit),
+            (Look::Plain | Look::List, false) => mix(rest, theme.accent_2, lit),
             _ => mix(rest, theme.text_1, lit),
         };
         let icon = self.icon.map(|_| self.icon_size(theme)).unwrap_or(0.0);
@@ -426,7 +428,11 @@ impl Widget for SegmentButton {
         };
         let room = (r.width() - 2.0 * self.padding()).max(0.0);
         let width = (icon + gap + label).min(room);
-        let mut x = r.center().x - width / 2.0;
+        let mut x = if self.look == Look::List {
+            r.x0 + self.padding()
+        } else {
+            r.center().x - width / 2.0
+        };
         // short of room: clipped to the space inside the padding
         let pad = self.padding().min(r.width() / 2.0);
         ctx.push_clip_rect(&Rect::new(r.x0 + pad, r.y0, r.x1 - pad, r.y1));
@@ -477,6 +483,7 @@ pub struct SegmentedControl<T: Clone + PartialEq + Send + Sync + 'static> {
     options: Vec<Segment<T>>,
     default: Option<T>,
     plain: bool,
+    vertical: bool,
     name: Option<TextProp>,
     on_change: Handler<T>,
     on_clear: Option<Rc<dyn Fn()>>,
@@ -498,6 +505,7 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> SegmentedControl<T> {
             options: Vec::new(),
             default: None,
             plain: false,
+            vertical: false,
             name: None,
             on_change: Rc::new(std::cell::RefCell::new(None)),
             on_clear: None,
@@ -540,6 +548,14 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> SegmentedControl<T> {
         self
     }
 
+    /// The plain variant as a list: one option a row, as wide as the list –
+    /// the pages of a sidebar
+    pub fn vertical(mut self) -> Self {
+        self.plain = true;
+        self.vertical = true;
+        self
+    }
+
     /// Sm, Md (default), Lg – the heights of buttons of these sizes
     pub fn size(mut self, size: ControlSize) -> Self {
         self.group.size = size;
@@ -569,7 +585,11 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> SegmentedControl<T> {
             let at = at.clone();
             move || at.get().is_some_and(|(_, implied)| !implied)
         });
-        let look = if self.plain { Look::Plain } else { Look::Track };
+        let look = match (self.vertical, self.plain) {
+            (true, _) => Look::List,
+            (false, true) => Look::Plain,
+            (false, false) => Look::Track,
+        };
         for (i, o) in self.options.iter().enumerate() {
             let chosen = ArcSignal::derive({
                 let at = at.clone();
@@ -709,7 +729,12 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Widget for SegmentedControl<T
         let gap = taffy::LengthPercentage::length(if self.plain { 2.0 } else { 0.0 });
         taffy::Style {
             display: taffy::Display::Grid,
-            grid_template_columns: (0..n).map(|_| taffy::style_helpers::flex(1.0)).collect(),
+            // a list: one column as wide as the list, a row each
+            grid_template_columns: if self.vertical {
+                vec![taffy::style_helpers::flex(1.0)]
+            } else {
+                (0..n).map(|_| taffy::style_helpers::flex(1.0)).collect()
+            },
             gap: taffy::Size {
                 width: gap,
                 height: gap,
@@ -720,8 +745,16 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Widget for SegmentedControl<T
                 top: taffy::LengthPercentage::length(0.0),
                 bottom: taffy::LengthPercentage::length(0.0),
             },
-            align_self: Some(taffy::AlignSelf::START),
-            justify_self: Some(taffy::JustifySelf::START),
+            align_self: Some(if self.vertical {
+                taffy::AlignSelf::STRETCH
+            } else {
+                taffy::AlignSelf::START
+            }),
+            justify_self: Some(if self.vertical {
+                taffy::JustifySelf::STRETCH
+            } else {
+                taffy::JustifySelf::START
+            }),
             min_size: taffy::Size {
                 width: taffy::LengthPercentageAuto::length(0.0),
                 height: taffy::LengthPercentageAuto::auto(),

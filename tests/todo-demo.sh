@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Changing children, with examples/todo in a headless session, scale 1 and 2:
+# Changing children, with the gallery's todo page in a headless session, scale 1 and 2:
 #   For        – rows appear for added tasks (Enter and the button), in order
 #   keyed      – removing one task keeps the other rows' widgets: a focused row stays focused
 #   focus      – removing the focused "Remove" moves focus to the next one, at the end to the
@@ -13,8 +13,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/todo-demo
 mkdir -p "$OUT"
-cargo build -q --release --example todo -p kiesel-ui
-BIN=target/release/examples/todo
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=todo
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.3; }
@@ -33,12 +38,12 @@ expect_rows() {
 }
 # types a task the quick way: focus the field, set its text, Return (which goes to the focused widget)
 add() { $H a11y focus --role entry "New task"; $H a11y set --role entry "New task" = "$1"; $H key Return; }
-pss() { awk '/^Pss:/{print $2}' "/proc/$(pgrep -x todo)/smaps_rollup"; }
+pss() { awk '/^Pss:/{print $2}' "/proc/$(pgrep -x gallery)/smaps_rollup"; }
 
 run_case() {
   local scale=$1
   tag="${scale}x"
-  pkill -x todo || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 520x520 --scale "$scale" >/dev/null
   KIESEL_STATS=1 $H run "$BIN" >"$OUT/$tag.log" 2>&1 &
@@ -95,9 +100,9 @@ run_case() {
   after=$(pss)
   (( after - before < 1024 )) || fail "$tag: memory grew by $(( (after - before) / 1024 )) MiB over three rounds"
 
-  pkill -x todo || true
+  pkill -x gallery || true
   echo "ok  $tag  (PSS $((before / 1024)) → $((after / 1024)) MiB over three rounds of 25 tasks)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x todo || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

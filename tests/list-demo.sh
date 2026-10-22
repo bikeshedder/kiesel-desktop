@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Scrolling, with examples/list (200 rows in a scroll view) in a headless session, scale 1 and 2:
+# Scrolling, with the gallery's list page (200 rows in a scroll view) in a headless session, scale 1 and 2:
 #   wheel      – three notches glide the content up; frames redraw the viewport only
 #   touchpad   – a swipe moves it, and momentum carries it further after the fingers lift, then stops
 #   keys       – Tab reveals the focused row; End, Home, PageDown from a focused button reach the
@@ -14,8 +14,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/list-demo
 mkdir -p "$OUT"
-cargo build -q --release --example list -p kiesel-ui
-BIN=target/release/examples/list
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=list
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.6; }   # glides take 150 ms; the tree follows when motion rests
@@ -33,7 +38,7 @@ offset() {
 run_case() {
   local scale=$1
   tag="${scale}x"
-  pkill -x list || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 520x560 --scale "$scale" >/dev/null
   KIESEL_STATS=1 $H run "$BIN" >"$OUT/$tag.log" 2>&1 &
@@ -115,9 +120,9 @@ sys.exit(f'FAIL: $tag: {len(big)} of {len(share)} wheel frames redrew more than 
   sleep 1.8; a=$(frames); sleep 1; b=$(frames)
   (( a == b )) || fail "$tag: $((b - a)) frames while idle"
 
-  pkill -x list || true
+  pkill -x gallery || true
   echo "ok  $tag  (wheel moved Item 5 from $start5 to $now5; momentum and keys work)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x list || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

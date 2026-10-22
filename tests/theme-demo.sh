@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Theme switching test for examples/theme in a headless session, scale 1 and 2:
+# Theme switching test for the gallery's theme page in a headless session, scale 1 and 2:
 #   system   – with a (fake) XDG portal preferring dark, the app starts dark; a
 #              change of the preference cross-fades the window, then frames stop
 #   choice   – the switch (pointer) and Space on it choose light or dark; a choice
 #              ignores the system; the sun and the moon choose too
-#   saved    – the choice is in $XDG_CONFIG_HOME/de.kiesel.ThemeDemo/kiesel.conf and
+#   saved    – the choice is in $XDG_CONFIG_HOME/de.kiesel.Gallery/kiesel.conf and
 #              survives a restart; "Follow system" goes back to the portal
 #   one run  – KIESEL_THEME picks a mode without saving it
 # Screenshots and logs land in shots/theme-demo/.
@@ -14,15 +14,17 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/theme-demo
 mkdir -p "$OUT"
-cargo build -q --release --example theme -p kiesel-ui
-BIN=target/release/examples/theme
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=theme
 export XDG_CONFIG_HOME="$PWD/$OUT/config"
-CONF="$XDG_CONFIG_HOME/de.kiesel.ThemeDemo/kiesel.conf"
+CONF="$XDG_CONFIG_HOME/de.kiesel.Gallery/kiesel.conf"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.5; }  # longer than the 300 ms fade
 launch() { # [env…]
-  pkill -x theme || true
+  pkill -x gallery || true
   env "$@" KIESEL_STATS=1 kiesel-headless run "$BIN" >"$OUT/$tag.log" 2>&1 &
   sleep 1.5
 }
@@ -52,7 +54,7 @@ run_case() {
   local scale=$1
   tag="${scale}x"
   rm -rf "$XDG_CONFIG_HOME"
-  pkill -x theme || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 520x400 --scale "$scale" >/dev/null
 
@@ -111,9 +113,9 @@ run_case() {
   expect_caption "Dark, chosen here" "with KIESEL_THEME=dark"
   grep -qx "theme = system" "$CONF" || fail "$tag: KIESEL_THEME was saved"
 
-  pkill -x theme || true
+  pkill -x gallery || true
   echo "ok  $tag  ($((b - a)) frames to cross-fade, 0 after)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x theme || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

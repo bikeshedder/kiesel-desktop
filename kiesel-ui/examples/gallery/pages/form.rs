@@ -2,15 +2,15 @@
 //! Enter (or "Create") submits.
 //!
 //!   kiesel-headless start --scale 2
-//!   kiesel-headless run cargo run --example form
+//!   KIESEL_PAGE=form kiesel-headless run cargo run --example gallery
 
-use kiesel_ui::kurbo::Size;
+use crate::App;
 use kiesel_ui::{
-    Align, ArcRwSignal, ArcSignal, Button, Card, Flex, Get, GetUntracked, Justify, Label, Options,
-    Set, TextField, TextRole, space,
+    Align, ArcRwSignal, ArcSignal, Button, Card, Flex, Get, GetUntracked, Justify, Label, Set,
+    TextField, TextRole, space,
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn page(_app: &App) -> Flex {
     let name = ArcRwSignal::new(String::new());
     let created = ArcRwSignal::new(None::<String>);
 
@@ -63,17 +63,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }))
                 .child(Button::new("Create").on_click(create)),
         );
-    let root = Flex::stack()
+    Flex::stack()
         .justify(Justify::Center)
         .align(Align::Center)
         .padding(space(5))
-        .child(card);
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Form".into(),
-            size: Size::new(520.0, 360.0),
-            ..Default::default()
-        },
-        root,
-    )
+        .child(card)
 }

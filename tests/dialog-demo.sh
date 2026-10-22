@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Layout and redraw test for examples/dialog in a headless session, scale 1 and 2:
+# Layout and redraw test for the gallery's dialog page in a headless session, scale 1 and 2:
 #   layout   – the paragraph wraps to more lines in a narrow window, the
 #              buttons stay on the card's right; all of it found through AT-SPI
 #   redraw   – while the spinner turns, frames redraw a small region only
@@ -14,8 +14,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/dialog-demo
 mkdir -p "$OUT"
-cargo build -q --release --example dialog -p kiesel-ui
-BIN=target/release/examples/dialog
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=dialog
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 PARAGRAPH="You changed the invoice period and two time entries. Save them now, or reset the form to what was stored – your edits are gone then."
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -24,7 +29,7 @@ settle() { sleep 0.4; }
 launch() { # <scale> <log> [env…]
   local scale=$1 log=$2
   shift 2
-  pkill -x dialog || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 640x420 --scale "$scale" >/dev/null
   env "$@" KIESEL_STATS=1 kiesel-headless run "$BIN" >"$log" 2>&1 &
@@ -91,9 +96,9 @@ diff = max(hi for _, hi in ImageChops.difference(a, b).getextrema())
 if diff > 2:
     sys.exit(f"FAIL: {sys.argv[3]}: partial and full redraws differ by up to {diff}")
 EOF
-  pkill -x dialog || true
+  pkill -x gallery || true
   echo "ok  $tag  (paragraph ${wide} → ${narrow} px high when narrow)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x dialog || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

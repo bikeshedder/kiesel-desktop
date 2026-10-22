@@ -8,14 +8,12 @@
 //! - View: the plain variant, for navigation – a flat accent tint
 //!
 //!   kiesel-headless start --scale 2
-//!   kiesel-headless run cargo run --example segmented
+//!   KIESEL_PAGE=segmented kiesel-headless run cargo run --example gallery
 
-mod app_icons;
-
-use kiesel_ui::kurbo::Size;
+use crate::App;
 use kiesel_ui::{
-    Align, ArcRwSignal, ArcSignal, Card, ControlSize, Field, Flex, Get, Justify, Label, Options,
-    Segment, SegmentedControl, Set, TextRole, ThemeMode, ThemeSwitch, Theming, ToggleGroup, space,
+    Align, ArcRwSignal, ArcSignal, Card, ControlSize, Field, Flex, Get, Justify, Label, Segment,
+    SegmentedControl, Set, TextRole, ThemeMode, ThemeSwitch, ToggleGroup, space,
 };
 
 /// Sets `s` to what was chosen
@@ -24,8 +22,8 @@ fn set<T: Send + Sync + 'static>(s: &ArcRwSignal<T>) -> impl FnMut(T) + 'static 
     move |v| s.set(v)
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let theming = Theming::new("de.kiesel.SegmentedDemo");
+pub fn page(app: &App) -> Flex {
+    let theming = app.theming.clone();
     let density = ArcRwSignal::new(None::<&'static str>);
     let format = ArcRwSignal::new(vec!["bold"]);
     let view = ArcRwSignal::new("overview");
@@ -76,11 +74,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .child(Field::new(
             "Format",
             ToggleGroup::new(format.clone())
-                .option(Segment::icon_only("bold", app_icons::BOLD, "Bold"))
-                .option(Segment::icon_only("italic", app_icons::ITALIC, "Italic"))
+                .option(Segment::icon_only("bold", crate::app_icons::BOLD, "Bold"))
+                .option(Segment::icon_only(
+                    "italic",
+                    crate::app_icons::ITALIC,
+                    "Italic",
+                ))
                 .option(Segment::icon_only(
                     "underline",
-                    app_icons::UNDERLINE,
+                    crate::app_icons::UNDERLINE,
                     "Underline",
                 ))
                 .on_change(set(&format)),
@@ -116,33 +118,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .accessible_name("View, small")
                         .option(Segment::icon_only(
                             "overview",
-                            app_icons::LAYOUT_GRID,
+                            crate::app_icons::LAYOUT_GRID,
                             "Grid",
                         ))
-                        .option(Segment::icon_only("activity", app_icons::LIST, "List"))
+                        .option(Segment::icon_only(
+                            "activity",
+                            crate::app_icons::LIST,
+                            "List",
+                        ))
                         .on_change(set(&view)),
                 )
                 .child(
                     SegmentedControl::new(view.clone())
                         .size(ControlSize::Lg)
                         .accessible_name("View, large")
-                        .option(Segment::new("overview", "Grid").icon(app_icons::LAYOUT_GRID))
-                        .option(Segment::new("activity", "List").icon(app_icons::LIST))
+                        .option(
+                            Segment::new("overview", "Grid").icon(crate::app_icons::LAYOUT_GRID),
+                        )
+                        .option(Segment::new("activity", "List").icon(crate::app_icons::LIST))
                         .on_change(set(&view)),
                 ),
         );
-    let root = Flex::stack()
+    Flex::stack()
         .justify(Justify::Center)
         .align(Align::Center)
         .padding(space(5))
-        .child(card);
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Segmented".into(),
-            size: Size::new(640.0, 660.0),
-            theming,
-            ..Default::default()
-        },
-        root,
-    )
+        .child(card)
 }

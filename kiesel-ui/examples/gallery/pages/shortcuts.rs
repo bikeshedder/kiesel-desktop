@@ -5,22 +5,23 @@
 //!   (the field keeps the keys it uses itself: Ctrl+A selects its text)
 //! - Ctrl+E exports – but while the "More" popover is open, its Archive
 //!   button has Ctrl+E: the topmost popup comes first
-//! - Ctrl+L, an app shortcut, switches between English and German
+//! - Ctrl+L, the gallery's own shortcut, switches between English and German
 //!
 //!   kiesel-headless start --scale 2
-//!   kiesel-headless run cargo run --example shortcuts
+//!   KIESEL_PAGE=shortcuts kiesel-headless run cargo run --example gallery
 
+use crate::App;
 use kiesel_ui::i18n::{self, add_catalog};
-use kiesel_ui::kurbo::Size;
 use kiesel_ui::{
-    Align, ArcRwSignal, Button, Card, Flex, Get, Justify, Kbd, Label, Options, Popover, Set,
-    Shortcut, Shortcuts, TextField, TextRole, Update, WithUntracked, space, t, t_with,
+    Align, ArcRwSignal, Button, Card, Flex, Get, Justify, Kbd, Label, Popover, Shortcut, TextField,
+    TextRole, Update, space, t, t_with,
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// This page's messages, in English and German
+pub fn catalogs() {
     add_catalog(
         "en",
-        "demo",
+        "shortcuts",
         r#"{ "title": "Shortcuts", "save": "Save", "export": "Export", "more": "More",
              "archive": "Archive", "note": "Note",
              "last": ".input {$n :number} .match $n 0 {{Nothing yet}} * {{{$what} ({$n})}}",
@@ -29,21 +30,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     add_catalog(
         "de",
-        "demo",
+        "shortcuts",
         r#"{ "title": "Tastenkürzel", "save": "Speichern", "export": "Exportieren", "more": "Mehr",
              "archive": "Archivieren", "note": "Notiz",
              "last": ".input {$n :number} .match $n 0 {{Noch nichts}} * {{{$what} ({$n})}}",
              "saved": "Gespeichert", "exported": "Exportiert", "archived": "Archiviert",
              "hint": "Sprache wechseln" }"#,
     );
+}
 
+pub fn page(_app: &App) -> Flex {
     // what happened last, and how many things happened
-    let last = ArcRwSignal::new((0_usize, "demo.saved"));
+    let last = ArcRwSignal::new((0_usize, "shortcuts.saved"));
     let did = |what: &'static str| {
         let last = last.clone();
         move || last.update(|(n, w)| (*n, *w) = (*n + 1, what))
     };
-    let status = t_with("demo.last", {
+    let status = t_with("shortcuts.last", {
         let (last, language) = (last.clone(), i18n::language());
         move || {
             let (n, what) = last.get();
@@ -56,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let more = ArcRwSignal::new(false);
     let more_panel = {
-        let archived = did("demo.archived");
+        let archived = did("shortcuts.archived");
         move || {
             let archived = archived.clone();
             Flex::stack().padding(space(2)).child(
@@ -64,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .gap(space(2))
                     .align(Align::Center)
                     .child(
-                        Button::new(t("demo.archive"))
+                        Button::new(t("shortcuts.archive"))
                             .shortcut("Primary+E")
                             .on_click(archived),
                     )
@@ -83,15 +86,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let card = Card::new()
         .max_width(440.0)
-        .child(Label::title(t("demo.title")))
+        .child(Label::title(t("shortcuts.title")))
         .child(Label::new(status).role(TextRole::Caption))
-        .child(TextField::new().label(t("demo.note")).grow())
+        .child(TextField::new().label(t("shortcuts.note")).grow())
         .child(row(
-            Button::new(t("demo.save")).on_click(did("demo.saved")),
+            Button::new(t("shortcuts.save")).on_click(did("shortcuts.saved")),
             "Primary+S",
         ))
         .child(row(
-            Button::new(t("demo.export")).on_click(did("demo.exported")),
+            Button::new(t("shortcuts.export")).on_click(did("shortcuts.exported")),
             "Primary+E",
         ))
         .child(
@@ -101,45 +104,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .child(
                     Popover::new(
                         more.clone(),
-                        Button::new(t("demo.more")).on_click({
+                        Button::new(t("shortcuts.more")).on_click({
                             let more = more.clone();
                             move || more.update(|o| *o = !*o)
                         }),
                         more_panel,
                     )
-                    .label(t("demo.more")),
+                    .label(t("shortcuts.more")),
                 )
                 .child(
                     Flex::cluster()
                         .gap(space(2))
                         .align(Align::Center)
-                        .child(Label::new(t("demo.hint")).role(TextRole::Caption))
+                        .child(Label::new(t("shortcuts.hint")).role(TextRole::Caption))
                         .child(Kbd::new(Shortcut::primary('l').text())),
                 ),
         );
 
-    let language = i18n::language();
-    let shortcuts = Shortcuts::new().on("Primary+L", move || {
-        let next = if language.with_untracked(|l| l.starts_with("de")) {
-            "en"
-        } else {
-            "de"
-        };
-        language.set(next.into());
-    });
-
-    let root = Flex::stack()
+    Flex::stack()
         .justify(Justify::Center)
         .align(Align::Center)
         .padding(space(5))
-        .child(card);
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Shortcuts".into(),
-            size: Size::new(520.0, 460.0),
-            shortcuts,
-            ..Default::default()
-        },
-        root,
-    )
+        .child(card)
 }

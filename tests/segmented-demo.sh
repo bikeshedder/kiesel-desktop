@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Segmented controls and toggle groups, with examples/segmented in a headless session, scale 1 and 2:
+# Segmented controls and toggle groups, with the gallery's segmented page in a headless session, scale 1 and 2:
 #   a11y      – radio groups named by their field (or their own name), radio buttons and
 #               toggle buttons with their states
 #   choose    – a click on Dark switches the theme; the knob slides (frames), then rests
@@ -16,8 +16,10 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/segmented-demo
 mkdir -p "$OUT"
-cargo build -q --release --example segmented -p kiesel-ui
-BIN=target/release/examples/segmented
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=segmented
 export XDG_CONFIG_HOME="$PWD/$OUT/config"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -42,7 +44,7 @@ run_case() {
   local scale=$1
   tag="${scale}x"
   rm -rf "$XDG_CONFIG_HOME"
-  pkill -x segmented || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 640x660 --scale "$scale" >/dev/null
   $H portal light
@@ -99,9 +101,9 @@ run_case() {
   expect List "radio button 'List' checked" "the small control follows"
   $H shot "$OUT/$tag-done.png"
 
-  pkill -x segmented || true
+  pkill -x gallery || true
   echo "ok  $tag  ($((b - a)) frames in 250 ms of sliding; keyboard, optional, toggles, plain)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x segmented || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

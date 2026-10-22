@@ -3,16 +3,16 @@
 //! scrollbar can be dragged.
 //!
 //!   kiesel-headless start --scale 2
-//!   kiesel-headless run cargo run --example list
+//!   KIESEL_PAGE=list kiesel-headless run cargo run --example gallery
 
-use kiesel_ui::kurbo::Size;
+use crate::App;
 use kiesel_ui::{
-    Align, ArcRwSignal, Button, Card, Flex, For, Justify, Label, Options, Scroll, Set, TextRole,
-    ThemeSwitch, Theming, space,
+    Align, ArcRwSignal, Button, Card, Flex, For, Justify, Label, Scroll, Set, TextRole,
+    ThemeSwitch, space,
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let theming = Theming::unsaved();
+pub fn page(app: &App) -> Flex {
+    let theming = app.theming.clone();
     let opened = ArcRwSignal::new(String::from("Nothing opened yet"));
     let items: Vec<u32> = (1..=200).collect();
 
@@ -44,17 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .child(Scroll::new(Flex::stack().gap(space(2)).padding(space(1)).child(rows)).grow())
         .child(Label::bound(opened).role(TextRole::Caption));
-    let root = Flex::stack()
+    Flex::stack()
         .align(Align::Center)
         .padding(space(5))
-        .child(card);
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – List".into(),
-            size: Size::new(520.0, 560.0),
-            theming,
-            ..Default::default()
-        },
-        root,
-    )
+        .child(card)
 }

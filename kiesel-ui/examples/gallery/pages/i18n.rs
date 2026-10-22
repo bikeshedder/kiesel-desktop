@@ -5,29 +5,33 @@
 //!   kiesel-headless start --scale 2
 //!   KIESEL_LANG=de kiesel-headless run cargo run --example i18n
 
+use crate::App;
 use kiesel_ui::i18n::{self, add_catalog};
-use kiesel_ui::kurbo::Size;
 use kiesel_ui::{
-    Align, ArcRwSignal, Button, Card, Flex, Get, Justify, Label, Options, Set, TextRole,
-    ThemeSwitch, Theming, Update, space, t, t_with,
+    Align, ArcRwSignal, Button, Card, Flex, Get, Justify, Label, Set, TextRole, ThemeSwitch,
+    Update, space, t, t_with,
 };
 
 const NAMES: [&str; 4] = ["Ann", "Bo", "Cy", "Dee"];
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // the app's own messages, next to Kiesel's
+/// This page's messages, in English and German
+pub fn catalogs() {
     add_catalog(
         "en",
-        "demo",
+        "i18n",
         r#"{ "title": "Languages", "more": "One more", "fewer": "One fewer" }"#,
     );
     add_catalog(
         "de",
-        "demo",
+        "i18n",
         r#"{ "title": "Sprachen", "more": "Einer mehr", "fewer": "Einer weniger" }"#,
     );
+}
 
-    let theming = Theming::unsaved();
+pub fn page(app: &App) -> Flex {
+    // the app's own messages, next to Kiesel's
+
+    let theming = app.theming.clone();
     let n = ArcRwSignal::new(1_usize);
     let language = i18n::language();
 
@@ -62,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Flex::cluster()
                 .nowrap()
                 .justify(Justify::Between)
-                .child(Label::title(t("demo.title")))
+                .child(Label::title(t("i18n.title")))
                 .child(ThemeSwitch::new(&theming)),
         )
         .child(
@@ -80,25 +84,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .child(
             Flex::cluster()
                 .justify(Justify::End)
-                .child(Button::new(t("demo.fewer")).on_click({
+                .child(Button::new(t("i18n.fewer")).on_click({
                     let n = n.clone();
                     move || n.update(|n| *n = n.saturating_sub(1))
                 }))
-                .child(Button::new(t("demo.more")).on_click(move || n.update(|n| *n += 1)))
+                .child(Button::new(t("i18n.more")).on_click(move || n.update(|n| *n += 1)))
                 .child(Button::new(t("kiesel.common.cancel"))),
         );
-    let root = Flex::stack()
+    Flex::stack()
         .justify(Justify::Center)
         .align(Align::Center)
         .padding(space(5))
-        .child(card);
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Languages".into(),
-            size: Size::new(520.0, 420.0),
-            theming,
-            ..Default::default()
-        },
-        root,
-    )
+        .child(card)
 }

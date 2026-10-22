@@ -3,14 +3,14 @@
 //! focus to the next one.
 //!
 //!   kiesel-headless start --scale 2
-//!   kiesel-headless run cargo run --example todo
+//!   KIESEL_PAGE=todo kiesel-headless run cargo run --example gallery
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use kiesel_ui::kurbo::Size;
+use crate::App;
 use kiesel_ui::{
-    Align, ArcRwSignal, ArcSignal, Button, Card, Flex, For, GetUntracked, Justify, Label, Options,
-    Set, Show, TextField, TextRole, Update, With, space,
+    Align, ArcRwSignal, ArcSignal, Button, Card, Flex, For, GetUntracked, Justify, Label, Set,
+    Show, TextField, TextRole, Update, With, space,
 };
 
 #[derive(Clone)]
@@ -19,7 +19,7 @@ struct Task {
     title: String,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn page(_app: &App) -> Flex {
     let tasks = ArcRwSignal::new(Vec::<Task>::new());
     let draft = ArcRwSignal::new(String::new());
     let next_id = std::sync::Arc::new(AtomicU64::new(1));
@@ -90,17 +90,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .child(Flex::stack().gap(space(2)).child(rows))
         .child(Label::bound(count).role(TextRole::Caption));
-    let root = Flex::stack()
+    Flex::stack()
         .justify(Justify::Center)
         .align(Align::Center)
         .padding(space(5))
-        .child(card);
-    kiesel_ui::run(
-        Options {
-            title: "Kiesel – Tasks".into(),
-            size: Size::new(520.0, 520.0),
-            ..Default::default()
-        },
-        root,
-    )
+        .child(card)
 }

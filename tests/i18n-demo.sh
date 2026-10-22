@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Messages, with examples/i18n in a headless session, scale 1 and 2:
+# Messages, with the gallery's i18n page in a headless session, scale 1 and 2:
 #   detection – LANG=de_AT.UTF-8 gives German; a language without a catalog gives English
 #   catalogs  – Kiesel's messages (Cancel, the ThemeSwitch's names) and the app's own
 #   formats   – plurals (1 Ergebnis / 2 Ergebnisse), lists (Ann und Bo), grouped numbers
@@ -11,8 +11,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/i18n-demo
 mkdir -p "$OUT"
-cargo build -q --release --example i18n -p kiesel-ui
-BIN=target/release/examples/i18n
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=i18n
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.3; }
@@ -20,7 +25,7 @@ has() { $H a11y 2>/dev/null | grep -qF "$1" || fail "$tag: no \"$1\" ($2)"; }
 width() { $H a11y box "$1" 2>/dev/null | awk '{print $3}'; }
 
 launch() { # env…
-  pkill -x i18n || true
+  pkill -x gallery || true
   env -u KIESEL_LANG -u LC_ALL -u LC_MESSAGES -u LANGUAGE "$@" kiesel-headless run "$BIN" >"$OUT/$tag.log" 2>&1 &
   sleep 1.5
 }
@@ -62,9 +67,9 @@ run_case() {
   (( en_width < de_width )) || fail "$tag: the button didn't take its new width ($de_width → $en_width)"
   $H shot "$OUT/$tag-en.png"
 
-  pkill -x i18n || true
+  pkill -x gallery || true
   echo "ok  $tag  (\"Einer mehr\" ${de_width} px → \"One more\" ${en_width} px)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x i18n || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done

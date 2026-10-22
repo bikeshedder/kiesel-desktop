@@ -14,6 +14,9 @@ The stack, measured baselines and the headless test setup are in [PLAN.md](PLAN.
   clean, memory and frames checked against PLAN.md. One commit per step, or a few.
 - **Porting:** look and states from Kiesel Web (tokens, CSS, ARIA). Where the web's behaviour is a browser
   convention, the desktop convention wins: focus, the context-menu key, Ctrl/Cmd, double-click timing, scrolling.
+- **Examples are gallery pages:** every example is a page of the one example app,
+  `kiesel-ui/examples/gallery` (`pages/<id>.rs`, listed in `PAGES`) – no standalone examples. Its test opens the
+  page alone with `KIESEL_PAGE=<id>`; `tests/gallery-demo.sh` checks the app as a whole.
 - **Idle costs nothing:** no frames without a change; animations damage only what moves.
 - **Frame budget:** the software renderer targets **60 Hz** (16.7 ms per frame, full-window frames included, at
   2560×1600 and 4K). 120 Hz is the GPU renderer's goal (D5), not the software renderer's.
@@ -38,27 +41,27 @@ Without these, every widget after Field and Checkbox would be built twice.
 
 - [x] **M** **Changing children.** Widgets added and removed at runtime: mount and unmount (watches stop), layout
   nodes and accessibility nodes follow, focus moves on when the focused widget goes. `Show` (when) and `For`
-  (keyed lists) as SolidJS has them. Layout-transparent like CSS `display: contents`. Example: `todo`;
+  (keyed lists) as SolidJS has them. Layout-transparent like CSS `display: contents`. Gallery page: `todo`;
   `tests/todo-demo.sh` also checks that filling and emptying a list doesn't grow memory.
 - [x] **M** **Scrolling.** `Scroll`: touchpads 1:1 with momentum after the lift (τ 325 ms), wheel steps of
   `viewport^(2/3)` animated, PageUp/Down, arrows, Home/End bubbling from the focused widget, focus and
   AT-SPI scrollTo revealing widgets, Kiesel's overlay scrollbar (thin while scrolling, wide under the pointer,
   draggable, fading out). Scroll frames only re-place (no measuring) and redraw the viewport; at 4K a momentum
-  frame takes ~8 ms. Example: `list`.
+  frame takes ~8 ms. Gallery page: `list`.
 - [x] **M** **Popups.** An in-window layer above the content, as on Kiesel Web – decided over real popup
   surfaces because softbuffer's Wayland buffers have no alpha (no rounded corners, no shadows). Panels lay
   themselves out at their natural size and are placed next to their anchor: flipped, slid along the edge, below
   when neither side fits; Kiesel's float shadow, optional arrow, the "shift" animation. A click outside or Escape
   dismisses the topmost; a press on the owner only closes it; opened from the keyboard, focus moves in and Tab
   stays inside; focus returns on close. `Popover` is the first user. Real popup surfaces (which may leave the
-  window) can follow with the GPU renderer, whose surfaces have alpha. Example: `popover`.
+  window) can follow with the GPU renderer, whose surfaces have alpha. Gallery page: `popover`.
 - [x] **S** **Messages.** Kiesel Web's catalogs, embedded as they are (`locales/<lang>/kiesel.json`, keys
   `kiesel.<key>`), plus a small `desktop.json`; apps add their own (`add_catalog`). A MessageFormat 2 subset
   covers every message they use: placeholders, `:number`, `:list`, `.input`, `.match` over several selectors
   with exact keys, plural categories and `*`. The language comes from the environment (`KIESEL_LANG`, `LC_*`,
   `LANG`) and is a signal: `t()`/`t_with()` texts follow it, so switching updates exactly the widgets showing
   text. Plural rules, numbers and lists cover English and German; other languages and dates (ICU4X) when an app
-  needs them. Keep the catalogs in sync with Kiesel Web by copying them. Example: `i18n`.
+  needs them. Keep the catalogs in sync with Kiesel Web by copying them. Gallery page: `i18n`.
 - [x] **S** **System settings.** The portal's appearance beyond the colour scheme, followed live (`SystemPrefs`):
   accent colour (`accent-color` → Kiesel's accent), contrast (`contrast` high → `--ksl-contrast: 2`), reduced
   motion (`reduced-motion` or GNOME's `enable-animations`: no transitions, fades, glides or popup animations;
@@ -71,7 +74,7 @@ Without these, every widget after Field and Checkbox would be built twice.
   `Button::shortcut`) – the topmost popup's before the window's – then to the app's (`Options::shortcuts`).
   Labels the platform's way and localised ("Ctrl+Shift+S", "Strg+Umschalt+S", "⇧⌘S"); `Kbd` shows them.
   TextField's clipboard keys use the same keymap. Open: macOS word movement (⌥), user-configurable keymaps,
-  and AT-SPI key bindings (AccessKit leaves them empty on Linux). Example: `shortcuts`.
+  and AT-SPI key bindings (AccessKit leaves them empty on Linux). Gallery page: `shortcuts`.
 - [x] **S** **Icons.** `tools/lucide-icons.py --out src/icons.rs save trash-2 …` takes the icons an app uses
   from lucide-static (pinned version, checksum verified, cached) into `IconNode` consts, with Lucide's ISC notice
   and Feather's MIT one when needed; the toolkit's own are in `kiesel_ui::lucide`. `Icon` (1.25 em, stroke
@@ -87,20 +90,20 @@ What most desktop apps need first, settings dialogs above all.
   the hint. The control learns it through `Widget::link_field`: labelled-by the label (AT-SPI names it from
   that), described by the message, required, invalid – and draws a red edge and ring. A press on the label
   focuses the control (`Widget::press_focuses`). Open: AT-SPI has no invalid state from AccessKit (Windows and
-  macOS get it); the web's error fade-in. Example: `field`.
+  macOS get it); the web's error fade-in. Gallery page: `field`.
 - [x] **M** `Checkbox`, `CheckboxGroup`, `RadioGroup`; `Switch` with a visible label and description (settings
   rows, label first). One widget (`Toggle`) in three looks: the whole row is the control (a press on its text
   toggles), label and description are its name and description; sizes Sm/Md/Lg; Checkbox indeterminate and its
   own error (a consent). Groups go in a `Field` (legend, hint, error marking every option red); "Select all"
   (indeterminate while some are); in a radio group only the chosen option is a Tab stop
   (`Widget::tab_stop`) and the arrows choose and move focus (`EventCx::request_focus`). Open: disabled options,
-  CheckboxGroup's columns, filter, groups and cards, the radio legend's small caps. Example: `choices`.
+  CheckboxGroup's columns, filter, groups and cards, the radio legend's small caps. Gallery page: `choices`.
 - [x] **S** `SegmentedControl` / `ToggleGroup` – e.g. System · Light · Dark next to the ThemeSwitch. A sunken
   well drawn around the buttons (they line up with a plain button), equal columns, a knob sliding with the
   spring; a default that holds while none is chosen (a ghost knob) and `on_clear`; the `plain` variant for
   navigation (a flat accent tint); icons, icon-only options with names, Sm/Md/Lg. A radio group for
   assistive technology (arrows, one Tab stop); `ToggleGroup` makes every chosen option its own knob. Open:
-  Kiesel's single `Toggle` (a toggle group of one), wrapping plain options. Example: `segmented`.
+  Kiesel's single `Toggle` (a toggle group of one), wrapping plain options. Gallery page: `segmented`.
 - [ ] **M** `Textarea` – TextField over several lines: line navigation, vertical scrolling (needs D1 scrolling).
 - [ ] **M** `NumberField` (steppers, Up/Down) and `PasswordField` (reveal, no copy).
 - [ ] **L** `Select` and the combobox (`TextField` with options) on a shared option list – search, groups,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checkboxes, radios and switches, with examples/choices in a headless session, scale 1 and 2:
+# Checkboxes, radios and switches, with the gallery's choices page in a headless session, scale 1 and 2:
 #   a11y      – groups named by their field, required; rows are check boxes, radio
 #               buttons and a switch; "Select all" is indeterminate while some are
 #   pointer   – a press on a row's text toggles it; "Select all" checks all, then none
@@ -15,8 +15,13 @@ cd "$(dirname "$0")/.."
 H=kiesel-headless
 OUT=shots/choices-demo
 mkdir -p "$OUT"
-cargo build -q --release --example choices -p kiesel-ui
-BIN=target/release/examples/choices
+cargo build -q --release --example gallery -p kiesel-ui
+BIN=target/release/examples/gallery
+# the gallery shows this one page, filling the window
+export KIESEL_PAGE=choices
+# its own settings: a theme chosen here stays here
+export XDG_CONFIG_HOME="$PWD/$OUT/config"
+rm -rf "$XDG_CONFIG_HOME"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 settle() { sleep 0.5; }  # the springs take up to 380 ms
@@ -45,7 +50,7 @@ print(sum(1 for r, g, b in crop.getdata() if r > g + 60 and r > b + 40))" "$1" "
 run_case() {
   local scale=$1
   tag="${scale}x"
-  pkill -x choices || true
+  pkill -x gallery || true
   $H stop >/dev/null 2>&1 || true
   $H start --size 560x820 --scale "$scale" >/dev/null
   KIESEL_STATS=1 $H run "$BIN" >"$OUT/$tag.log" 2>&1 &
@@ -103,9 +108,9 @@ run_case() {
   sleep 0.5; local a b; a=$(frames); sleep 1; b=$(frames)
   (( a == b )) || fail "$tag: $((b - a)) frames while idle"
 
-  pkill -x choices || true
+  pkill -x gallery || true
   echo "ok  $tag  (tree, pointer, keyboard, errors – $reds red px; idle)"
 }
 
-trap '$H stop >/dev/null 2>&1 || true; pkill -x choices || true' EXIT
+trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT
 for scale in 1 2; do run_case "$scale"; done
