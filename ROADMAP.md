@@ -119,14 +119,17 @@ What most desktop apps need first, settings dialogs above all.
   from keys – winit doesn't report it); `confirm()` without an eye. TextField gained trailing widgets, end
   alignment and hooks; widgets can be woken for an action (`Event::Tick`). Open: units to choose from, the
   duration format, TextField sizes. Gallery page: `inputs`.
-- [ ] **L** `Select` and the combobox (`TextField` with options) on a shared option list – search, groups,
-  keyboard, multiple – on D1 popups. *Select done:* a raised trigger, the list in a popup at least as wide
+- [x] **L** `Select` and the combobox (`TextField` with options) on a shared option list – search, groups,
+  keyboard, multiple – on D1 popups. Select: a raised trigger, the list in a popup at least as wide
   and fitting the larger side of the window (list popups take the focus, onto the chosen option –
   `Widget::prefers_focus`); options with icons, descriptions, groups, keywords, disabled; arrows, Home/End,
   typeahead, Enter/Space; `searchable` (filter, marked matches, count, "No results", Enter takes the first,
   Down/Up between field and list); `on_clear`; `multiple` (ticks, the list stays open, Backspace on the
-  trigger). A combo box with a list box for assistive technology. Open: the combobox, chosen values as tags
-  with "+N", virtual rows for very long lists, `collapseRest`, server search. Gallery page: `select`.
+  trigger). A combo box with a list box for assistive technology. `ComboBox`: free text with suggestions – the list
+  shows while there is text with matches (or after Down), the field keeps the focus, Up/Down highlight, Enter
+  or a click takes one (its label becomes the text); an editable combo box whose highlighted option is the
+  active descendant (AccessKit's AT-SPI adapter reports neither that nor "expanded" yet). Open: chosen values
+  as tags with "+N", virtual rows for very long lists, `collapseRest`, server search. Gallery page: `select`.
 - [x] **M** `Slider`: a crisp track, the accent fill, Kiesel's knob (swelling while held); a press jumps, a drag
   follows; arrows, PageUp/PageDown (a tenth), Home/End; range and step (snapping, the step's decimals); Sm/Md/Lg;
   `show_value` writes the value at the track's end; in a `Field` its label, hint and error; a slider with value,

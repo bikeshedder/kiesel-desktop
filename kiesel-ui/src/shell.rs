@@ -503,7 +503,9 @@ impl Shell {
                     layer.restore_focus = self.focused;
                     layer.opened_at(now, self.theme.reduce_motion);
                     // opened from the keyboard – or a list, which always takes the focus
-                    if (self.focus_visible && self.focused == Some(layer.owner)) || layer.list {
+                    if !layer.keep_focus
+                        && ((self.focus_visible && self.focused == Some(layer.owner)) || layer.list)
+                    {
                         focus_into = Some(layer.id());
                     }
                     self.root.push_layer(layer);

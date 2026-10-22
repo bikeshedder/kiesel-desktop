@@ -82,6 +82,8 @@ pub struct Popup {
     /// A list (a select's options): no padding of its own, at most 400 px high,
     /// at least as wide as its anchor
     pub list: bool,
+    /// Focus stays where it is (a combobox's field) – a list otherwise takes it
+    pub keep_focus: bool,
 }
 
 pub(crate) enum Command {
@@ -218,8 +220,9 @@ pub(crate) struct Layer {
     label: String,
     children: Vec<Box<dyn Widget>>,
     on_dismiss: Option<Box<dyn FnMut()>>,
-    /// A list: focus moves in however it opened
+    /// A list: focus moves in however it opened (unless it keeps it out)
     pub list: bool,
+    pub keep_focus: bool,
     /// Focused before it opened: focus goes back there
     pub restore_focus: Option<WidgetId>,
     layout: Layout,
@@ -246,6 +249,7 @@ impl Layer {
             children: vec![p.content],
             on_dismiss: p.on_dismiss,
             list: p.list,
+            keep_focus: p.keep_focus,
             restore_focus: None,
             layout: Layout::default(),
             bounds: Rect::ZERO,
@@ -727,6 +731,7 @@ impl Widget for Popover {
                     content: (self.make)(),
                     on_dismiss: Some(Box::new(move || open.set(false))),
                     list: false,
+                    keep_focus: false,
                 }));
             }
             (false, Some(layer)) => {

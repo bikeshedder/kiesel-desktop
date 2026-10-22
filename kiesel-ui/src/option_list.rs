@@ -141,6 +141,9 @@ pub(crate) struct OptionRow {
     query: ArcSignal<String>,
     /// Focus goes here when the list opens (the chosen one, without a search field)
     prefer: bool,
+    /// A combobox's list: the row takes no focus, the field shows it highlighted
+    highlight: Option<ArcSignal<bool>>,
+    shown_highlight: bool,
     choose: Choose,
     watch: Option<Watch>,
     shown_selected: bool,
@@ -188,9 +191,13 @@ impl Widget for OptionRow {
 
     fn mount(&mut self, cx: &mut MountCx<'_>) {
         let (selected, query) = (self.selected.clone(), self.query.clone());
+        let highlight = self.highlight.clone();
         self.watch = Some(cx.watch(self.id, move || {
             selected.track();
             query.track();
+            if let Some(h) = &highlight {
+                h.track();
+            }
         }));
     }
 
@@ -208,6 +215,14 @@ impl Widget for OptionRow {
         }
         if query != self.shown_query {
             self.shown_query = query;
+            change |= Change::PAINT;
+        }
+        let highlight = self
+            .highlight
+            .as_ref()
+            .is_some_and(GetUntracked::get_untracked);
+        if highlight != self.shown_highlight {
+            self.shown_highlight = highlight;
             change |= Change::PAINT;
         }
         change
@@ -243,7 +258,7 @@ impl Widget for OptionRow {
     }
 
     fn focusable(&self) -> bool {
-        !self.disabled
+        !self.disabled && self.highlight.is_none()
     }
 
     fn prefers_focus(&self) -> bool {
@@ -309,7 +324,7 @@ impl Widget for OptionRow {
         let r = self.bounds;
         let alpha = if self.disabled { 0.45 } else { 1.0 };
         // under the pointer, or focused: pressed into the list (--ksl-inset-sm)
-        if (self.hovered || self.focused) && !self.disabled {
+        if (self.hovered || self.focused || self.shown_highlight) && !self.disabled {
             let radius = theme.metrics.radius;
             let inset = |x: f64, color| Shadow {
                 inset: true,
@@ -466,6 +481,10 @@ pub(crate) struct ListSetup<T: Send + Sync + 'static> {
     pub choose: Rc<dyn Fn(T)>,
     /// Focus the chosen option when the list opens (without a search field)
     pub prefer_selected: bool,
+    /// A combobox: the highlighted option's index; the rows take no focus,
+    /// presses keep it in the field (`owner`)
+    pub active: Option<ArcSignal<Option<usize>>>,
+    pub owner: Option<WidgetId>,
     /// Up on the first option, or a letter typed: back to the search field
     pub on_top: Option<OnTop>,
     pub label: String,
@@ -480,6 +499,7 @@ pub(crate) struct OptionList {
     id: WidgetId,
     children: Vec<Box<dyn Widget>>,
     on_top: Option<OnTop>,
+    owner: Option<WidgetId>,
     label: String,
     multiple: bool,
     bounds: Rect,
@@ -499,6 +519,7 @@ impl OptionList {
             s.choose.clone(),
         );
         let prefer = s.prefer_selected;
+        let active = s.active.clone();
         let rows = For::boxed(
             rows_signal,
             |r: &Row| match r {
@@ -537,6 +558,11 @@ impl OptionList {
                             selected: is,
                             query: query.clone(),
                             prefer,
+                            highlight: active.clone().map(|a| {
+                                let i = *i;
+                                ArcSignal::derive(move || a.get() == Some(i))
+                            }),
+                            shown_highlight: false,
                             choose: Rc::new(move || choose(value.clone())),
                             watch: None,
                             shown_query: String::new(),
@@ -559,6 +585,7 @@ impl OptionList {
             id: WidgetId::next(),
             children: vec![Box::new(Scroll::new(list).grow())],
             on_top: s.on_top,
+            owner: s.owner,
             label: s.label,
             multiple: s.multiple,
             bounds: Rect::ZERO,
@@ -611,6 +638,11 @@ impl Widget for OptionList {
 
     fn bounds(&self) -> Rect {
         self.bounds
+    }
+
+    /// A combobox's list: a press on it keeps the focus in the field
+    fn press_focuses(&self, _p: Point) -> Option<WidgetId> {
+        self.owner
     }
 
     /// Keys from the focused option: arrows, Home/End, a letter jumps to the

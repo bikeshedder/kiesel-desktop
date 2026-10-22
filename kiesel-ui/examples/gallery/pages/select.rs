@@ -8,8 +8,8 @@
 use crate::App;
 use crate::app_icons;
 use kiesel_ui::{
-    Align, ArcRwSignal, ArcSignal, Card, ControlSize, Field, Flex, Get, Justify, Label, Select,
-    SelectOption, Set, TextRole, space,
+    Align, ArcRwSignal, ArcSignal, Card, ComboBox, ControlSize, Field, Flex, Get, Justify, Label,
+    Select, SelectOption, Set, TextRole, space,
 };
 
 const COUNTRIES: &[(&str, &str, &str)] = &[
@@ -33,10 +33,23 @@ const COUNTRIES: &[(&str, &str, &str)] = &[
     ("kr", "South Korea", "Asia"),
 ];
 
+const CITIES: &[(&str, &str, &str)] = &[
+    ("ber", "Berlin", "Germany"),
+    ("ham", "Hamburg", "Germany"),
+    ("muc", "Munich", "Germany"),
+    ("vie", "Vienna", "Austria"),
+    ("grz", "Graz", "Austria"),
+    ("zrh", "Zurich", "Switzerland"),
+    ("brn", "Bern", "Switzerland"),
+    ("bgn", "Bergen", "Norway"),
+];
+
 pub fn page(_app: &App) -> Flex {
     let status = ArcRwSignal::new(Some("active"));
     let country = ArcRwSignal::new(None::<&'static str>);
     let channels = ArcRwSignal::new(vec!["email"]);
+    let city = ArcRwSignal::new(String::new());
+    let picked = ArcRwSignal::new(None::<&'static str>);
 
     let summary = ArcSignal::derive({
         let (status, country, channels) = (status.clone(), country.clone(), channels.clone());
@@ -96,6 +109,26 @@ pub fn page(_app: &App) -> Flex {
                     }),
             )
             .hint("Type to search – a country code works too"),
+        )
+        .child(
+            Field::new(
+                "City",
+                ComboBox::new(city.clone())
+                    .placeholder("Start typing…")
+                    .options(
+                        CITIES
+                            .iter()
+                            .map(|&(id, name, country)| SelectOption::new(id, name).group(country)),
+                    )
+                    .on_choose({
+                        let picked = picked.clone();
+                        move |v| picked.set(Some(v))
+                    }),
+            )
+            .hint(ArcSignal::derive(move || match picked.get() {
+                Some(id) => format!("Suggestion taken: {id}"),
+                None => "Free text, or take a suggestion".into(),
+            })),
         )
         .child(Field::new(
             "Notify via",

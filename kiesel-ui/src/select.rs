@@ -363,6 +363,8 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Select<T> {
                 selection: selection.clone(),
                 choose: choose.clone(),
                 prefer_selected: !self.searchable,
+                active: None,
+                owner: None,
                 on_top,
                 label,
                 multiple,
@@ -498,6 +500,7 @@ impl<T: Clone + PartialEq + Send + Sync + 'static> Widget for Select<T> {
                     content: Box::new(self.panel()),
                     on_dismiss: Some(Box::new(move || open.set(false))),
                     list: true,
+                    keep_focus: false,
                 }));
                 self.sync(cx.now, cx.theme);
             }

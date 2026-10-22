@@ -50,6 +50,14 @@ type OnInput = Box<dyn FnMut(&str)>;
 /// Sees a key before the field: true if it used it (a number field's Up/Down)
 type OnKey = Box<dyn FnMut(&KeyPress, &mut EventCx<'_>) -> bool>;
 
+/// A combobox, for assistive technology: whether its list shows, and the
+/// option highlighted in it
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Combo {
+    pub expanded: bool,
+    pub active: Option<WidgetId>,
+}
+
 /// A number field, for assistive technology: a spin button
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Spin {
@@ -139,6 +147,8 @@ pub struct TextField {
     pub(crate) on_step: Option<Box<dyn FnMut(i8)>>,
     /// A number field: what a spin button reports
     pub(crate) spin: Option<Box<dyn Fn() -> Spin>>,
+    /// A combobox: what it reports
+    pub(crate) combo: Option<Box<dyn Fn() -> Combo>>,
     /// A password: hidden behind bullets while this is true
     pub(crate) mask: Option<ArcSignal<bool>>,
     shown_mask: bool,
@@ -191,6 +201,7 @@ impl TextField {
             on_input: None,
             on_step: None,
             spin: None,
+            combo: None,
             mask: None,
             shown_mask: false,
             bullet_text: String::new(),
@@ -1092,10 +1103,19 @@ impl Widget for TextField {
     fn accessibility(&self) -> Option<accesskit::Node> {
         let mut node = accesskit::Node::new(match (&self.spin, self.lines) {
             _ if self.mask.is_some() => accesskit::Role::PasswordInput,
+            _ if self.combo.is_some() => accesskit::Role::EditableComboBox,
             (Some(_), _) => accesskit::Role::SpinButton,
             (None, Some(_)) => accesskit::Role::MultilineTextInput,
             (None, None) => accesskit::Role::TextInput,
         });
+        if let Some(combo) = &self.combo {
+            let c = combo();
+            node.set_expanded(c.expanded);
+            node.set_has_popup(accesskit::HasPopup::Listbox);
+            if let Some(a) = c.active {
+                node.set_active_descendant(a.node());
+            }
+        }
         if let Some(spin) = &self.spin {
             let s = spin();
             if let Some(v) = s.value {
