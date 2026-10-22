@@ -34,6 +34,17 @@ focused() { $H a11y 2>/dev/null | grep ' focused' | head -1 | sed "s/^ *//; s/ f
 summary() { $H a11y 2>/dev/null | sed -n "s/^ *label '\(.* · .*\)'$/\1/p"; }
 has() { $H a11y 2>/dev/null | grep -qF "$1"; }
 expect() { [[ "$1" == "$2" ]] || fail "$tag: '$1', expected '$2' ($3)"; }
+# a row's mean brightness: the focused option is pressed in, darker than the rest
+shade() {
+  $H shot "$OUT/$tag-shade.png"
+  python3 -c "
+import sys
+from PIL import Image
+s, (x, y, w, h) = float(sys.argv[2]), map(int, sys.argv[3:7])
+im = Image.open(sys.argv[1]).convert('L').crop((int(x * s), int(y * s), int((x + w) * s), int((y + h) * s)))
+px = list(im.getdata())
+print(sum(px) // len(px))" "$OUT/$tag-shade.png" "$scale" $($H a11y box --role "list item" "$1")
+}
 open_count() { $H a11y 2>/dev/null | grep -c '^ *dialog ' || true; }
 
 run_case() {
@@ -61,6 +72,11 @@ run_case() {
   expect "$(focused)" "list item 'Active'" "Down skips Archived (disabled) and wraps"
   $H key d; settle
   expect "$(focused)" "list item 'Done'" "a letter jumps"
+  # the look follows the focus: Done pressed in, Paused not (any more)
+  (( $(shade Done) + 4 < $(shade Paused) )) || fail "$tag: the focused option doesn't show"
+  $H key Up; settle
+  (( $(shade Paused) + 4 < $(shade Done) )) || fail "$tag: the focus look didn't move up to Paused"
+  $H key d; settle
   $H key Return; settle
   expect "$(summary)" "done · no country · email" "Enter chooses"
   expect "$(open_count)" 0 "and closes"

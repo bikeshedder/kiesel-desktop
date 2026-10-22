@@ -155,6 +155,8 @@ pub(crate) struct OptionRow {
     hovered: bool,
     focused: bool,
     armed: bool,
+    /// Hover or focus changed: drawn again at the next update
+    repaint: bool,
 }
 
 impl OptionRow {
@@ -225,6 +227,9 @@ impl Widget for OptionRow {
             self.shown_highlight = highlight;
             change |= Change::PAINT;
         }
+        if std::mem::take(&mut self.repaint) {
+            change |= Change::PAINT;
+        }
         change
     }
 
@@ -279,6 +284,7 @@ impl Widget for OptionRow {
                 (row.choose)();
             }
         };
+        let before = (self.hovered, self.focused);
         match event {
             Event::PointerEnter => self.hovered = true,
             Event::PointerLeave => self.hovered = false,
@@ -299,7 +305,8 @@ impl Widget for OptionRow {
             Event::Focus { focused, .. } => self.focused = *focused,
             _ => {}
         }
-        let _ = cx;
+        // the pressed-in look follows hover and focus
+        self.repaint |= (self.hovered, self.focused) != before;
     }
 
     fn accessibility(&self) -> Option<accesskit::Node> {
@@ -573,6 +580,7 @@ impl OptionList {
                             hovered: false,
                             focused: false,
                             armed: false,
+                            repaint: false,
                         };
                         ids.borrow_mut().insert(*i, row.id);
                         Box::new(row)
