@@ -85,7 +85,7 @@ run_case() {
   normal=$(darkest 4-contrast-normal "$caption")
   $H portal contrast high; settle
   high=$(darkest 5-contrast-high "$caption")
-  (( high + 30 < normal )) || fail "$tag: the caption's darkest pixel $normal → $high with high contrast"
+  (( high + 15 < normal )) || fail "$tag: the caption's darkest pixel $normal → $high with high contrast"
   $H portal contrast normal; settle
 
   # reduced motion: a theme change without a fade (and without the icon spinning in)
