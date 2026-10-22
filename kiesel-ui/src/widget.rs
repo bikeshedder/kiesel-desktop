@@ -168,9 +168,16 @@ pub struct EventCx<'a> {
     /// Set by a widget that used the event: keys and scrolling go on to the
     /// ancestors until one does
     pub handled: bool,
+    /// Asked for with [`EventCx::request_focus`]
+    pub(crate) focus_request: Option<WidgetId>,
 }
 
 impl EventCx<'_> {
+    /// Moves focus to `id` after this event, visibly (arrow keys in a radio group)
+    pub fn request_focus(&mut self, id: WidgetId) {
+        self.focus_request = Some(id);
+    }
+
     /// A key press as shortcuts see it: `cx.press(event).is_some_and(|p| Shortcut::copy().matches(&p))`
     pub fn press(&self, event: &Event) -> Option<KeyPress> {
         match event {
@@ -347,6 +354,12 @@ pub trait Widget: AsAny {
         false
     }
 
+    /// In the Tab order (a focusable widget can leave it: radios other than the
+    /// checked one are reached with the arrow keys)
+    fn tab_stop(&self) -> bool {
+        self.focusable()
+    }
+
     /// Inside a [`Field`](crate::Field): what labels and describes it, whether
     /// it is invalid. Called once, before it is mounted.
     fn link_field(&mut self, _link: crate::field::FieldLink) {}
@@ -482,7 +495,7 @@ fn narrower(clip: Option<Rect>, w: &dyn Widget) -> Option<Rect> {
 pub fn focus_order(w: &dyn Widget) -> Vec<WidgetId> {
     let mut ids = Vec::new();
     walk(w, &mut |w| {
-        if w.focusable() {
+        if w.focusable() && w.tab_stop() {
             ids.push(w.id());
         }
     });

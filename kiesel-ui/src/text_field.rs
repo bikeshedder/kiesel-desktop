@@ -831,6 +831,7 @@ mod tests {
                 modifiers,
                 clicks: 1,
                 handled: false,
+                focus_request: None,
             };
             self.field.event(&mut cx, &event);
         }

@@ -280,8 +280,9 @@ impl Shell {
             modifiers: self.modifiers,
             clicks: self.clicks,
             handled: false,
+            focus_request: None,
         };
-        match widget::find_mut(self.root.as_mut(), id) {
+        let found = match widget::find_mut(self.root.as_mut(), id) {
             Some(w) => {
                 w.event(&mut cx, &event);
                 if !self.touched.contains(&id) {
@@ -291,7 +292,12 @@ impl Shell {
                 true
             }
             None => false,
+        };
+        if let Some(to) = cx.focus_request {
+            self.set_focus(Some(to), true);
+            self.reveal(to);
         }
+        found
     }
 
     /// Sends `event` to `target`, then to its ancestors until one handles it
@@ -731,6 +737,15 @@ impl Shell {
                 .into_iter()
                 .rev()
                 .find_map(|id| widget::find(self.root.as_ref(), id)?.press_focuses(p))
+                // a group: its first stop (the checked radio)
+                .and_then(|id| {
+                    let w = widget::find(self.root.as_ref(), id)?;
+                    if w.focusable() {
+                        Some(id)
+                    } else {
+                        widget::focus_order(w).first().copied()
+                    }
+                })
         };
         self.set_focus(focus, false);
         if let Some(target) = target {

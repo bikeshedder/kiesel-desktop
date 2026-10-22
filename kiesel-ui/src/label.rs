@@ -20,6 +20,8 @@ pub struct Label {
     /// The text as of the last update – what is shaped and on screen
     shown: String,
     role: TextRole,
+    /// Another weight than the role's (a switch's label: 500)
+    weight: Option<f32>,
     /// Kept from assistive technology (`aria-hidden`): it repeats what the
     /// tree says otherwise
     hidden: bool,
@@ -45,6 +47,7 @@ impl Label {
             role: TextRole::Body,
             tone: None,
             hidden: false,
+            weight: None,
             layout: None,
             style: None,
             broken_at: None,
@@ -55,6 +58,20 @@ impl Label {
     pub fn role(mut self, role: TextRole) -> Self {
         self.role = role;
         self
+    }
+
+    /// Another font weight than the role's: 500 for a little emphasis
+    pub fn weight(mut self, weight: f32) -> Self {
+        self.weight = Some(weight);
+        self
+    }
+
+    fn text_style(&self, theme: &crate::theme::Theme) -> TextStyle {
+        let mut style = theme.text_style(self.role);
+        if let Some(w) = self.weight {
+            style.weight = w;
+        }
+        style
     }
 
     /// Kept from assistive technology, like `aria-hidden` – a decoration whose
@@ -84,7 +101,7 @@ impl Label {
     }
 
     fn layout(&mut self, cx: &mut LayoutCx<'_>) -> &mut Layout<()> {
-        let style = cx.theme.text_style(self.role);
+        let style = self.text_style(cx.theme);
         self.style = Some(style);
         self.layout
             .get_or_insert_with(|| cx.text.paragraph(&self.shown, &style))
@@ -120,9 +137,7 @@ impl Widget for Label {
 
     /// New text or another text size: shape again, and its size may change
     fn update(&mut self, cx: &mut LayoutCx<'_>) -> Change {
-        let restyled = self
-            .style
-            .is_some_and(|s| s != cx.theme.text_style(self.role));
+        let restyled = self.style.is_some_and(|s| s != self.text_style(cx.theme));
         if !restyled && self.text.with_untracked(|t| *t == self.shown) {
             // the tone may have changed: a repaint is cheap
             return if self.tone.is_some() {

@@ -19,9 +19,9 @@ use crate::i18n::{IntoText, TextProp, t};
 use crate::icon::IconNode;
 use crate::lucide;
 use crate::reactive::{MountCx, Watch};
-use crate::switch::Switch;
 use crate::theme::{ControlSize, Scheme, Theme, mix, space};
 use crate::theming::{ThemeMode, Theming};
+use crate::toggle::Switch;
 use crate::widget::{
     Available, Change, Event, EventCx, Known, LayoutCx, PaintCx, Widget, WidgetId, accessible_rect,
 };
@@ -344,7 +344,7 @@ impl ThemeSwitch {
             ),
             Box::new(
                 Switch::new(is(Scheme::Dark))
-                    .label(t("kiesel.themeSwitch.dark"))
+                    .accessible_name(t("kiesel.themeSwitch.dark"))
                     .size(size)
                     .on_change(move |dark| {
                         mode.set(if dark {

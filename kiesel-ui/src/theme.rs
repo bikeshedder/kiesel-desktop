@@ -116,6 +116,8 @@ pub struct Theme {
     pub field_shadow_invalid_focus: [Shadow; 3],
     /// `--ksl-danger`: errors, destructive actions
     pub danger: Color,
+    /// `--ksl-on-accent`: marks and text on the accent (a checkbox's tick)
+    pub on_accent: Color,
     /// `--ksl-icon`: icons that aren't text
     pub icon: Color,
     /// `--ksl-hi`, `--ksl-lo`, `--ksl-lo-strong`: the light and the dark of Soft UI depth
@@ -141,6 +143,8 @@ pub struct Metrics {
     /// `--ksl-control`
     pub control: f64,
     /// `--ksl-radius`
+    /// `--ksl-radius-sm`: small controls (a checkbox)
+    pub radius_sm: f64,
     pub radius: f64,
     /// `--ksl-radius-lg` (cards)
     pub radius_lg: f64,
@@ -346,6 +350,10 @@ impl Theme {
                 },
             ),
             danger,
+            on_accent: match scheme {
+                Scheme::Light => white(1.0),
+                Scheme::Dark => n(0.278, 0.0356),
+            },
             icon,
             hi,
             lo,
@@ -367,6 +375,7 @@ impl Theme {
                 control: 40.0 * f64::from(ap.density) * f64::from(ap.text_scale.max(1.0)),
                 radius: 6.0 * f64::from(ap.roundness),
                 radius_lg: 12.0 * f64::from(ap.roundness),
+                radius_sm: 5.0 * f64::from(ap.roundness),
                 padding_x: 20.0,
                 gap: 8.0,
                 font_size: 16.0 * ap.text_scale,
@@ -419,6 +428,7 @@ impl Theme {
                 t64,
             ),
             danger: c(a.danger, b.danger),
+            on_accent: c(a.on_accent, b.on_accent),
             icon: c(a.icon, b.icon),
             hi: c(a.hi, b.hi),
             lo: c(a.lo, b.lo),
@@ -467,6 +477,10 @@ pub enum TextRole {
     Caption,
     /// A field's label: `--font-size-0`, weight 600, `--ksl-text-2`
     FieldLabel,
+    /// Small controls' text: `--font-size-0`, `--ksl-text-2`
+    Small,
+    /// Large controls' text: `--font-size-2`, `--ksl-text-2`
+    Large,
     /// A field's error: `--font-size-0`, weight 500, `--ksl-danger`
     Error,
 }
@@ -497,6 +511,8 @@ impl Theme {
             TextRole::Title => (17.6, 600.0, 1.25),
             TextRole::Caption => (12.0, 400.0, 1.5),
             TextRole::FieldLabel => (12.0, 600.0, 1.5),
+            TextRole::Small => (12.0, 400.0, 1.5),
+            TextRole::Large => (17.6, 400.0, 1.5),
             TextRole::Error => (12.0, 500.0, 1.5),
         };
         // the desktop's text scale (font_size is 16 × it)
@@ -515,7 +531,7 @@ impl Theme {
             TextRole::Body => self.text_2,
             TextRole::Title => self.text_1,
             TextRole::Caption => self.text_3,
-            TextRole::FieldLabel => self.text_2,
+            TextRole::FieldLabel | TextRole::Small | TextRole::Large => self.text_2,
             TextRole::Error => self.danger,
         }
     }

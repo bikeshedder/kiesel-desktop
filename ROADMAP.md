@@ -88,8 +88,13 @@ What most desktop apps need first, settings dialogs above all.
   that), described by the message, required, invalid – and draws a red edge and ring. A press on the label
   focuses the control (`Widget::press_focuses`). Open: AT-SPI has no invalid state from AccessKit (Windows and
   macOS get it); the web's error fade-in. Example: `field`.
-- [ ] **M** `Checkbox`, `CheckboxGroup`, `Radio`; `Switch` with a visible label and description (settings rows,
-  label first).
+- [x] **M** `Checkbox`, `CheckboxGroup`, `RadioGroup`; `Switch` with a visible label and description (settings
+  rows, label first). One widget (`Toggle`) in three looks: the whole row is the control (a press on its text
+  toggles), label and description are its name and description; sizes Sm/Md/Lg; Checkbox indeterminate and its
+  own error (a consent). Groups go in a `Field` (legend, hint, error marking every option red); "Select all"
+  (indeterminate while some are); in a radio group only the chosen option is a Tab stop
+  (`Widget::tab_stop`) and the arrows choose and move focus (`EventCx::request_focus`). Open: disabled options,
+  CheckboxGroup's columns, filter, groups and cards, the radio legend's small caps. Example: `choices`.
 - [ ] **S** `SegmentedControl` / `ToggleGroup` – e.g. System · Light · Dark next to the ThemeSwitch.
 - [ ] **M** `Textarea` – TextField over several lines: line navigation, vertical scrolling (needs D1 scrolling).
 - [ ] **M** `NumberField` (steppers, Up/Down) and `PasswordField` (reveal, no copy).
