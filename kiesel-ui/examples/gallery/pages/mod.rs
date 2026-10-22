@@ -12,6 +12,7 @@ pub mod list;
 pub mod popover;
 pub mod segmented;
 pub mod shortcuts;
+pub mod slider;
 pub mod textarea;
 pub mod theme;
 pub mod todo;

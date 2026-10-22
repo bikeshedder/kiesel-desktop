@@ -60,6 +60,11 @@ pub const PAGES: &[Page] = &[
         make: pages::inputs::page,
     },
     Page {
+        id: "slider",
+        title: "Sliders",
+        make: pages::slider::page,
+    },
+    Page {
         id: "field",
         title: "Fields",
         make: pages::field::page,

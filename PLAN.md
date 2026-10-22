@@ -95,6 +95,7 @@ hold across pages; the other tests open their page alone (`KIESEL_PAGE`).
 `tests/list-demo.sh` scrolls by wheel, touchpad (momentum), keys and scrollbar, and checks AT-SPI scrollTo;
 `tests/todo-demo.sh` adds and removes widgets at runtime and watches memory.
 `tests/theme-demo.sh` follows a (fake) system preference, chooses, saves and restores the theme.
+`tests/slider-demo.sh` moves sliders by keys, press and drag and through AT-SPI's Value, with an error.
 `tests/inputs-demo.sh` steps, clamps and types numbers (also through AT-SPI's Value), hides and shows passwords.
 `tests/variants-demo.sh` checks button sizes, toggles, disabled buttons, groups and colours.
 `tests/textarea-demo.sh` edits across lines, scrolls by caret and wheel, submits with Ctrl+Enter, checks the limit.

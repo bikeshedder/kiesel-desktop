@@ -121,7 +121,11 @@ What most desktop apps need first, settings dialogs above all.
   duration format, TextField sizes. Gallery page: `inputs`.
 - [ ] **L** `Select` and the combobox (`TextField` with options) on a shared option list – search, groups,
   keyboard, multiple – on D1 popups.
-- [ ] **M** `Slider`.
+- [x] **M** `Slider`: a crisp track, the accent fill, Kiesel's knob (swelling while held); a press jumps, a drag
+  follows; arrows, PageUp/PageDown (a tenth), Home/End; range and step (snapping, the step's decimals); Sm/Md/Lg;
+  `show_value` writes the value at the track's end; in a `Field` its label, hint and error; a slider with value,
+  limits, Increment/Decrement and AT-SPI's Value. Open: gradient tracks (hue, temperature), the value in the
+  label row as on the web. Gallery page: `slider`.
 - [x] **S** Button variants and sizes: default, primary, soft, outline, ghost; Sm/Md/Lg (Xs and Xl map to
   them); a colour – danger, success, warning, info or any – re-deriving the accent like Kiesel's `.colored`;
   round; `pressed` (a toggle button); `disabled` (faded, inert, out of the Tab order, announced). `ButtonGroup`
