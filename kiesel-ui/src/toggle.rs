@@ -18,7 +18,7 @@ use std::time::Instant;
 use reactive_graph::traits::{Get, GetUntracked, Track, With};
 use reactive_graph::wrappers::read::ArcSignal;
 use vello_cpu::RenderContext;
-use vello_cpu::kurbo::{Point, Rect, RoundedRect, Shape, Size, Stroke, Vec2};
+use vello_cpu::kurbo::{Affine, Circle, Point, Rect, RoundedRect, Shape, Size, Stroke, Vec2};
 use vello_cpu::peniko::Gradient;
 use winit::cursor::CursorIcon;
 use winit::keyboard::Key;
@@ -668,7 +668,7 @@ impl Widget for Toggle {
             }
             Kind::Radio => {
                 let dot = self.check.value(now, theme.motion(DOT));
-                paint_radio(ctx, theme, r, dot, self.invalid, ring);
+                paint_radio(ctx, theme, r, self.size, dot, self.invalid, ring);
             }
             Kind::Switch => {
                 let pos = self.check.value(now, theme.motion(SLIDE));
@@ -762,16 +762,16 @@ fn paint_checkbox(
                 2.0,
                 0.0,
                 false,
-                mix(theme.accent_2, Color::BLACK, 0.4),
+                mix(theme.accent_fill_2, Color::BLACK, 0.4),
             ),
             theme.field_shadow[2],
         ];
         paint::outer_shadows(ctx, r, radius, &filled, a);
         let (p0, p1) = line_145(r);
-        let light = mix(theme.accent, Color::WHITE, 0.15);
+        let light = mix(theme.accent_fill, Color::WHITE, 0.15);
         ctx.set_paint(Gradient::new_linear(p0, p1).with_stops([
             (0.0, light.multiply_alpha(a)),
-            (1.0, theme.accent_2.multiply_alpha(a)),
+            (1.0, theme.accent_fill_2.multiply_alpha(a)),
         ]));
         ctx.fill_path(&paint::rounded(r, radius));
         paint::inset_shadows(ctx, r, radius, &filled, a);
@@ -787,18 +787,20 @@ fn paint_checkbox(
             ctx,
             square,
             3.0,
-            theme.on_accent.multiply_alpha(opacity),
+            theme.on_accent_fill.multiply_alpha(opacity),
             0.0,
             scale,
         );
     }
 }
 
-/// A round well, tinted with the accent when chosen, and a knob springing in
+/// A round well and, chosen, the theme switch in small: a knob in the accent
+/// colour springing up in it (10, 12 or 14 px – an even gap to the well)
 fn paint_radio(
     ctx: &mut RenderContext,
     theme: &Theme,
     r: Rect,
+    size: ControlSize,
     dot: f64,
     invalid: bool,
     ring: f32,
@@ -811,24 +813,48 @@ fn paint_radio(
         &theme.field_shadow
     };
     paint::outer_shadows(ctx, r, radius, well, 1.0);
-    let chosen = mix(theme.surface_sunken, theme.accent, 0.4);
-    ctx.set_paint(mix(theme.field_bg, chosen, dot.clamp(0.0, 1.0) as f32));
+    ctx.set_paint(theme.field_bg);
     ctx.fill_path(&paint::rounded(r, radius));
     paint::inset_shadows(ctx, r, radius, well, 1.0);
-    // the knob: 18 % in from the edge, scaled from nothing (it overshoots)
-    let edge = r.width() * 0.64 * dot.max(0.0);
-    if edge > 0.5 {
-        let k = Rect::from_center_size(r.center(), (edge, edge));
-        knob(
-            ctx,
-            theme,
-            k,
-            &[
-                shade(1.0, 2.0, 4.0, 0.0, false, theme.lo_strong),
-                shade(-1.0, -1.0, 2.0, 0.0, false, theme.hi),
-            ],
-        );
+
+    // the knob scales about the well's centre from nothing (overshooting with
+    // the spring); its light and highlight are laid over the well's box
+    let s = dot.max(0.0);
+    let knob_r = match size {
+        ControlSize::Xs | ControlSize::Sm => 5.0,
+        ControlSize::Md => 6.0,
+        ControlSize::Lg | ControlSize::Xl => 7.0,
+    };
+    if knob_r * s < 0.25 {
+        return;
     }
+    let (c, d) = (r.center(), r.width());
+    let base = *ctx.transform();
+    ctx.set_transform(
+        base * Affine::translate(c.to_vec2()) * Affine::scale(s) * Affine::translate(-c.to_vec2()),
+    );
+    let circle = Circle::new(c, knob_r).to_path(TOLERANCE);
+    // linear-gradient(160deg, accent-fill lightened 30 %, accent-fill-2 70 %)
+    let a = 160f64.to_radians();
+    let dir = Vec2::new(a.sin(), -a.cos());
+    let half = (d * a.sin().abs() + d * a.cos().abs()) / 2.0;
+    ctx.set_paint(
+        Gradient::new_linear(c - dir * half, c + dir * half).with_stops([
+            (0.3, mix(theme.accent_fill, Color::WHITE, 0.15)),
+            (0.7, theme.accent_fill_2),
+        ]),
+    );
+    ctx.fill_path(&circle);
+    // radial-gradient(circle at 50% 30%, white 30 %, transparent 45 %): the
+    // light on its top, reaching 45 % of the way to the well's farthest corner
+    let top = Point::new(c.x, r.y0 + 0.3 * d);
+    let reach = Vec2::new(d / 2.0, 0.7 * d).hypot();
+    ctx.set_paint(Gradient::new_radial(top, reach as f32).with_stops([
+        (0.0, Color::new([1.0, 1.0, 1.0, 0.3])),
+        (0.45, Color::new([1.0, 1.0, 1.0, 0.0])),
+    ]));
+    ctx.fill_path(&circle);
+    ctx.set_transform(base);
 }
 
 /// The sunken pill and the knob sliding (`pos`, overshooting with the spring)

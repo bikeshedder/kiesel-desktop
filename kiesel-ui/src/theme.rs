@@ -116,8 +116,15 @@ pub struct Theme {
     pub field_shadow_invalid_focus: [Shadow; 3],
     /// `--ksl-danger`: errors, destructive actions
     pub danger: Color,
-    /// `--ksl-on-accent`: marks and text on the accent (a checkbox's tick)
+    /// `--ksl-on-accent`: text on the accent
     pub on_accent: Color,
+    /// `--ksl-accent-fill`, `--ksl-accent-fill-2`: the accent filling a small mark
+    /// (a ticked box, a chosen radio's knob), its light top and dark bottom –
+    /// deeper than the accent in the dark, whose light text accent would glare
+    pub accent_fill: Color,
+    pub accent_fill_2: Color,
+    /// `--ksl-on-accent-fill`: what sits on it (the tick)
+    pub on_accent_fill: Color,
     /// `--ksl-icon`: icons that aren't text
     pub icon: Color,
     /// `--ksl-hi`, `--ksl-lo`, `--ksl-lo-strong`: the light and the dark of Soft UI depth
@@ -354,6 +361,18 @@ impl Theme {
                 Scheme::Light => white(1.0),
                 Scheme::Dark => n(0.278, 0.0356),
             },
+            accent_fill: match scheme {
+                Scheme::Light => accent,
+                Scheme::Dark => oklch(0.62, (ac * 0.95).min(0.16), ah, 1.0),
+            },
+            accent_fill_2: match scheme {
+                Scheme::Light => accent_2,
+                Scheme::Dark => oklch(0.52, ac.min(0.16), ah, 1.0),
+            },
+            on_accent_fill: match scheme {
+                Scheme::Light => white(1.0),
+                Scheme::Dark => oklch(0.985, 0.0, 0.0, 1.0),
+            },
             icon,
             hi,
             lo,
@@ -429,6 +448,9 @@ impl Theme {
             ),
             danger: c(a.danger, b.danger),
             on_accent: c(a.on_accent, b.on_accent),
+            accent_fill: c(a.accent_fill, b.accent_fill),
+            accent_fill_2: c(a.accent_fill_2, b.accent_fill_2),
+            on_accent_fill: c(a.on_accent_fill, b.on_accent_fill),
             icon: c(a.icon, b.icon),
             hi: c(a.hi, b.hi),
             lo: c(a.lo, b.lo),
