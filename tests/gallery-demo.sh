@@ -34,6 +34,7 @@ print('dark' if r + g + b < 3 * 128 else 'light')" "$OUT/$tag-bg.png"
 # page in the list → something only that page shows
 PAGES=(
   "Buttons|button 'Save changes'"
+  "Button styles|panel 'Alignment'"
   "Icons|image 'All saved'"
   "Text input|label 'New project'"
   "Fields|label 'Create an account'"
@@ -99,7 +100,7 @@ run_case() {
   (( a == b )) || fail "$tag: $((b - a)) frames while idle"
 
   pkill -x gallery || true
-  echo "ok  $tag  (14 pages twice, PSS $((before / 1024)) → $((after / 1024)) MiB; theme and language app-wide)"
+  echo "ok  $tag  (15 pages twice, PSS $((before / 1024)) → $((after / 1024)) MiB; theme and language app-wide)"
 }
 
 trap '$H stop >/dev/null 2>&1 || true; pkill -x gallery || true' EXIT

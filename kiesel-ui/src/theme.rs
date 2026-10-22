@@ -132,10 +132,20 @@ pub struct Theme {
     pub on_accent_fill: Color,
     /// `--ksl-icon`: icons that aren't text
     pub icon: Color,
-    /// `--ksl-hi`, `--ksl-lo`, `--ksl-lo-strong`: the light and the dark of Soft UI depth
+    /// `--ksl-hi`, `--ksl-lo`, `--ksl-lo-strong`, `--ksl-lo-soft`: the light and
+    /// the dark of Soft UI depth
     pub hi: Color,
     pub lo: Color,
     pub lo_strong: Color,
+    pub lo_soft: Color,
+    /// `--ksl-hairline`: thin lines that structure (between attached buttons)
+    pub hairline: Color,
+    /// `--ksl-success`, `--ksl-warning`, `--ksl-info`: status colours
+    pub success: Color,
+    pub warning: Color,
+    pub info: Color,
+    /// `--ksl-depth`: how strong shadows are (0 … 1, a glow scales with it)
+    pub depth: f32,
     /// `--ksl-rim`: a fine light edge around wells
     pub rim: Color,
     /// `--ksl-knob`: the 145° gradient of round knobs (0 %, 55 %, 100 %)
@@ -392,6 +402,33 @@ impl Theme {
             hi,
             lo,
             lo_strong,
+            lo_soft,
+            hairline: match scheme {
+                Scheme::Light => oklch(0.374, 0.0353 * t, hue, 0.09 + 0.05 * ch),
+                Scheme::Dark => white(0.07 + 0.04 * ch),
+            },
+            success: status(
+                scheme,
+                cl,
+                [0x3f, 0xa5, 0x7f],
+                [0x2a, 0x8a, 0x66],
+                [0x6f, 0xcc, 0xa6],
+            ),
+            warning: status(
+                scheme,
+                cl,
+                [0xd3, 0x9a, 0x32],
+                [0xc2, 0x86, 0x1c],
+                [0xe7, 0xbb, 0x63],
+            ),
+            info: status(
+                scheme,
+                cl,
+                [0x4f, 0x8f, 0xd3],
+                [0x36, 0x77, 0xc2],
+                [0x7f, 0xb4, 0xec],
+            ),
+            depth: d,
             rim,
             knob,
             surface_raised: raised,
@@ -472,6 +509,12 @@ impl Theme {
             hi: c(a.hi, b.hi),
             lo: c(a.lo, b.lo),
             lo_strong: c(a.lo_strong, b.lo_strong),
+            lo_soft: c(a.lo_soft, b.lo_soft),
+            hairline: c(a.hairline, b.hairline),
+            success: c(a.success, b.success),
+            warning: c(a.warning, b.warning),
+            info: c(a.info, b.info),
+            depth: b.depth,
             rim: c(a.rim, b.rim),
             knob: [
                 c(a.knob[0], b.knob[0]),
@@ -585,6 +628,16 @@ impl Theme {
             letter_spacing: 0.01,
             line_height: 1.5,
         }
+    }
+}
+
+/// A status colour: in the light theme lighter with less contrast
+/// (`color-mix(in oklab, low c-low, base)`), one tone in the dark
+fn status(scheme: Scheme, cl: f32, low: [u8; 3], base: [u8; 3], dark: [u8; 3]) -> Color {
+    let rgb = |[r, g, b]: [u8; 3]| Color::from_rgb8(r, g, b);
+    match scheme {
+        Scheme::Light => mix(rgb(base), rgb(low), cl),
+        Scheme::Dark => rgb(dark),
     }
 }
 

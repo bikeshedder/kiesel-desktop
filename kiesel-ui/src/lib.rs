@@ -30,7 +30,7 @@ pub mod theming;
 pub mod toggle;
 pub mod widget;
 
-pub use button::Button;
+pub use button::{Button, ButtonColor, ButtonGroup, Variant};
 pub use card::Card;
 pub use choice_group::{CheckboxGroup, Choice, RadioGroup};
 pub use control::{For, Show};
@@ -46,7 +46,7 @@ pub use segmented::{Segment, SegmentedControl, ToggleGroup};
 pub use shell::{Options, run};
 pub use shortcut::{IntoShortcut, KeyPress, Mods, Shortcut, Shortcuts, Trigger};
 pub use text_field::{TextField, Textarea};
-pub use theme::{Appearance, ControlSize, Scheme, TextRole, Theme, space};
+pub use theme::{Appearance, Color, ControlSize, Scheme, TextRole, Theme, space};
 pub use theme_switch::{IconToggle, ThemeSwitch};
 pub use theming::{SystemPrefs, ThemeMode, Theming};
 pub use toggle::{Checkbox, Switch, Toggle};

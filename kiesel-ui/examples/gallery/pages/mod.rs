@@ -14,6 +14,7 @@ pub mod shortcuts;
 pub mod textarea;
 pub mod theme;
 pub mod todo;
+pub mod variants;
 
 /// The pages' own messages, added once at start
 pub fn catalogs() {

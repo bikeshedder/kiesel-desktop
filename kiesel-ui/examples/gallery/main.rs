@@ -40,6 +40,11 @@ pub const PAGES: &[Page] = &[
         make: pages::button::page,
     },
     Page {
+        id: "variants",
+        title: "Button styles",
+        make: pages::variants::page,
+    },
+    Page {
         id: "icons",
         title: "Icons",
         make: pages::icons::page,

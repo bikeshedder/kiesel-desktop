@@ -114,7 +114,11 @@ What most desktop apps need first, settings dialogs above all.
 - [ ] **L** `Select` and the combobox (`TextField` with options) on a shared option list – search, groups,
   keyboard, multiple – on D1 popups.
 - [ ] **M** `Slider`.
-- [ ] **S** Button variants and sizes (primary, soft, outline, ghost; xs–xl; colour) – the theme tokens exist.
+- [x] **S** Button variants and sizes: default, primary, soft, outline, ghost; Sm/Md/Lg (Xs and Xl map to
+  them); a colour – danger, success, warning, info or any – re-deriving the accent like Kiesel's `.colored`;
+  round; `pressed` (a toggle button); `disabled` (faded, inert, out of the Tab order, announced). `ButtonGroup`
+  attached (one body, hairlines, outer corners) or spaced. Theme: `--ksl-lo-soft`, `--ksl-hairline`, the status
+  colours, depth. Open: badges, `block`/`align`, attention pulse, links. Gallery page: `variants`.
 
 ## D3 – Application structure
 
