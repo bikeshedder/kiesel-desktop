@@ -103,6 +103,10 @@ the input method (on only while a field is focused), AT-SPI Text/EditableText, a
 pointer and keyboard for the whole session, and registers as the seat's input method (input-method-v2). Open: no
 portal (file dialogs) in the headless session yet.
 
+Reference shots of the original, to compare a port against: in `kiesel/`, `bun run dev`, then
+`python3 -I scripts/screenshot.py "http://127.0.0.1:5173/#/c/radio-group" out.png --theme dark --lang en`
+(WebKitGTK under xvfb-run).
+
 ## Milestones
 
 Done and planned work is in [ROADMAP.md](ROADMAP.md) – Kiesel Desktop's own order, not Kiesel Web's.

@@ -24,6 +24,8 @@ RUN apt-get update \
     smem heaptrack valgrind procps \
     # WebView baseline (WebKitGTK = what Tauri uses on Linux) + image diffing
     python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1 python3-pil imagemagick unzip \
+    # Kiesel Web's scripts/screenshot.py: reference shots of the original's components
+    python3-gi-cairo gir1.2-soup-3.0 xvfb xauth \
   && rm -rf /var/lib/apt/lists/*
 
 # Bun rebuilds kiesel/dist for the WebView comparison (also answers as `node`)
