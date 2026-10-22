@@ -159,7 +159,7 @@ impl Widget for Kbd {
             let size = Size::new(f64::from(layout.width()), f64::from(layout.height()));
             let c = self.bounds.center();
             let origin = Point::new(c.x - size.width / 2.0, c.y - size.height / 2.0);
-            text::draw(cx.ctx, cx.res, layout, origin, theme.text_3);
+            text::draw(cx.ctx, cx.res, layout, origin, theme.text_2);
         }
     }
 

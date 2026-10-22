@@ -114,6 +114,11 @@ pub struct Theme {
     pub field_shadow_invalid: [Shadow; 3],
     /// Focused and invalid: the edge and a 3px ring in the danger colour
     pub field_shadow_invalid_focus: [Shadow; 3],
+    /// `--ksl-text-3-sunken`: muted text on a well (fields, tracks) – one step
+    /// darker in the light theme, where the well is darker than the page
+    pub text_3_sunken: Color,
+    /// `--ksl-hover-bg`: a faint tint under the pointer (flat options)
+    pub hover_bg: Color,
     /// `--ksl-danger`: errors, destructive actions
     pub danger: Color,
     /// `--ksl-on-accent`: text on the accent
@@ -243,9 +248,11 @@ impl Theme {
                 n(0.970, 0.0041),
                 n(c3(0.374, 0.310, 0.250), 0.0360),
                 n(c3(0.530, 0.470, 0.410), 0.0350),
-                n(c3(0.733, 0.585, 0.500), 0.0300),
+                // muted: at least 4.5:1 on the page and cards from medium contrast up (WCAG AA)
+                n(c3(0.733, 0.525, 0.490), 0.0300),
                 oklch(c3(0.62, 0.57, 0.52), ac.min(0.18), ah, 1.0),
-                oklch(c3(0.54, 0.50, 0.46), (ac * 1.08).min(0.19), ah, 1.0),
+                // accent as text – also on its own soft tint at least 4.5:1
+                oklch(c3(0.54, 0.47, 0.44), (ac * 1.08).min(0.19), ah, 1.0),
                 white(0.95 * d),
                 na(0.599, 0.0360, 0.55),
                 na(0.701, 0.0363, 0.32),
@@ -279,7 +286,7 @@ impl Theme {
                     n(c3(0.375, 0.295, 0.235), c3(0.0370, 0.0250, 0.0200)),
                     n(c3(0.913, 0.920, 0.960), c3(0.0139, 0.0120, 0.0080)),
                     n(c3(0.746, 0.780, 0.840), c3(0.0264, 0.0200, 0.0160)),
-                    n(c3(0.589, 0.640, 0.720), c3(0.0329, 0.0260, 0.0220)),
+                    n(c3(0.589, 0.670, 0.720), c3(0.0329, 0.0260, 0.0220)),
                     oklch(0.76, (ac * 0.85).min(0.15), ah, 1.0),
                     oklch(0.81, (ac * 0.77).min(0.14), ah, 1.0),
                     white(0.07 * d),
@@ -356,6 +363,14 @@ impl Theme {
                     ..outer(0.0, 0.0, 0.0, danger.multiply_alpha(0.22))
                 },
             ),
+            text_3_sunken: match scheme {
+                Scheme::Light => n(c3(0.733, 0.495, 0.460), 0.0300),
+                Scheme::Dark => text_3,
+            },
+            hover_bg: match scheme {
+                Scheme::Light => oklch(0.374, 0.0353 * t, hue, 0.045),
+                Scheme::Dark => white(0.035),
+            },
             danger,
             on_accent: match scheme {
                 Scheme::Light => white(1.0),
@@ -447,6 +462,8 @@ impl Theme {
                 t64,
             ),
             danger: c(a.danger, b.danger),
+            text_3_sunken: c(a.text_3_sunken, b.text_3_sunken),
+            hover_bg: c(a.hover_bg, b.hover_bg),
             on_accent: c(a.on_accent, b.on_accent),
             accent_fill: c(a.accent_fill, b.accent_fill),
             accent_fill_2: c(a.accent_fill_2, b.accent_fill_2),
