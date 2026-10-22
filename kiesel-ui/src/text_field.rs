@@ -1,5 +1,5 @@
-//! `TextField` – a single line of editable text in Kiesel's field well
-//! (see `kiesel/src/components/TextField`).
+//! `TextField` – a single line of editable text in Kiesel's field well, and
+//! [`Textarea`] – several lines (see `kiesel/src/components/TextField`).
 //!
 //! Editing is parley's `PlainEditor`: caret and selection by pointer (click,
 //! drag, double click for a word, triple click for all, Shift+click extends)
@@ -10,6 +10,12 @@
 //! habit), then stays – an idle field costs no frames.
 //!
 //! The value is a signal both ways: typing sets it, setting it replaces the text.
+//!
+//! A textarea wraps its lines (a `mono` one, for code, doesn't) and scrolls
+//! vertically to keep the caret in view, by wheel and touchpad too. Up and
+//! Down move by lines, PageUp and PageDown by what is visible, Home and End to
+//! the ends of the line (with Ctrl of the text); Enter starts a new line and
+//! Ctrl+Enter submits. Assistive technology reads it line by line.
 
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
@@ -32,8 +38,8 @@ use crate::shortcut::{KeyPress, Mods, Shortcut};
 use crate::text::{self, Text};
 use crate::theme::{TextRole, TextStyle, Theme, space};
 use crate::widget::{
-    Available, Change, Event, EventCx, Ime, Known, LayoutCx, PaintCx, Widget, WidgetId,
-    accessible_rect,
+    Available, Change, Event, EventCx, Ime, Known, LayoutCx, PaintCx, ScrollDelta, Widget,
+    WidgetId, accessible_rect,
 };
 
 /// Called with the text when Enter is pressed
@@ -42,6 +48,34 @@ type OnSubmit = Box<dyn FnMut(&str)>;
 const BLINK: Duration = Duration::from_millis(500);
 const BLINK_FOR: Duration = Duration::from_secs(10);
 const CARET_WIDTH: f32 = 1.5;
+
+/// A textarea: how many lines show, and whether it holds code
+#[derive(Clone, Copy)]
+struct Lines {
+    rows: usize,
+    /// Monospace, lines not wrapped – JSON, CSS, a config
+    mono: bool,
+}
+
+/// `--ksl-font-mono`
+const MONO: &str = "ui-monospace, \"DejaVu Sans Mono\", monospace";
+
+/// Several lines of editable text, with the same states as a [`TextField`]
+/// (put it in a [`Field`](crate::Field) for a label, hint and error)
+pub struct Textarea;
+
+impl Textarea {
+    /// Five lines high; more scroll. [`TextField::rows`] and [`TextField::mono`] change that.
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new() -> TextField {
+        let mut field = TextField::new();
+        field.lines = Some(Lines {
+            rows: 5,
+            mono: false,
+        });
+        field
+    }
+}
 
 /// Editing commands with platform shortcuts
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -74,8 +108,12 @@ pub struct TextField {
     synced: String,
     on_submit: Option<OnSubmit>,
     bounds: Rect,
+    /// A textarea's rows and font; `None`: one line
+    lines: Option<Lines>,
     /// How far the text is scrolled left to keep the caret in view
     scroll: f64,
+    /// How far a textarea's text is scrolled up
+    scroll_y: f64,
     /// Line height of its text (from the theme, at layout)
     line: f64,
     hovered: bool,
@@ -107,7 +145,9 @@ impl TextField {
             synced: String::new(),
             on_submit: None,
             bounds: Rect::ZERO,
+            lines: None,
             scroll: 0.0,
+            scroll_y: 0.0,
             line: 24.0,
             hovered: false,
             focused: false,
@@ -143,23 +183,66 @@ impl TextField {
         self
     }
 
-    /// Enter pressed
+    /// A textarea's height in lines (default 5); more lines scroll
+    pub fn rows(mut self, rows: usize) -> Self {
+        if let Some(l) = &mut self.lines {
+            l.rows = rows.max(1);
+        }
+        self
+    }
+
+    /// A textarea for code: a monospace font, lines not wrapped
+    pub fn mono(mut self) -> Self {
+        if let Some(l) = &mut self.lines {
+            l.mono = true;
+        }
+        self
+    }
+
+    /// Enter pressed (Ctrl+Enter in a textarea, where Enter starts a line)
     pub fn on_submit(mut self, f: impl FnMut(&str) + 'static) -> Self {
         self.on_submit = Some(Box::new(f));
         self
     }
 
-    /// Where the text starts, in window coordinates: the line centred in the well
+    /// Where the text starts, in window coordinates: the line centred in the
+    /// well; a textarea's first line at the top, scrolled
     fn text_origin(&self) -> Point {
-        Point::new(
-            self.bounds.x0 + space(3) - self.scroll,
-            self.bounds.y0 + (self.bounds.height() - self.line) / 2.0,
-        )
+        let y = match self.lines {
+            Some(_) => self.bounds.y0 + space(2) - self.scroll_y,
+            None => self.bounds.y0 + (self.bounds.height() - self.line) / 2.0,
+        };
+        Point::new(self.bounds.x0 + space(3) - self.scroll, y)
     }
 
-    /// The text box the field shows (inside its inline padding)
+    /// The text box the field shows (inside its padding)
     fn viewport(&self) -> Rect {
-        self.bounds.inflate(-space(3), 0.0)
+        let pad_y = if self.lines.is_some() { space(2) } else { 0.0 };
+        self.bounds.inflate(-space(3), -pad_y)
+    }
+
+    /// Lines wrap: a textarea, unless it holds code
+    fn wraps(&self) -> bool {
+        self.lines.is_some_and(|l| !l.mono)
+    }
+
+    /// The font: the body text's, a textarea for code monospace at 0.9 em
+    fn text_style(&self, theme: &Theme) -> TextStyle {
+        let mut style = theme.text_style(TextRole::Body);
+        if self.lines.is_some_and(|l| l.mono) {
+            style.family = MONO;
+            style.size *= 0.9;
+        }
+        style
+    }
+
+    /// How far a textarea's text can scroll up
+    fn max_scroll_y(&self) -> f64 {
+        let height = self
+            .editor
+            .try_layout()
+            .map_or(0.0, |l| f64::from(l.height()));
+        (height - self.viewport().height()).max(0.0)
     }
 
     /// The text without the composition in progress
@@ -175,15 +258,31 @@ impl TextField {
             return;
         };
         let width = f64::from(layout.width());
-        let caret = self.editor.ime_cursor_area().x1;
-        let view = self.viewport().width() - f64::from(CARET_WIDTH);
-        if caret - self.scroll > view {
-            self.scroll = caret - view;
-        } else if caret < self.scroll {
-            self.scroll = caret;
+        let area = self.editor.ime_cursor_area();
+        if self.wraps() {
+            self.scroll = 0.0;
+        } else {
+            let caret = area.x1;
+            let view = self.viewport().width() - f64::from(CARET_WIDTH);
+            if caret - self.scroll > view {
+                self.scroll = caret - view;
+            } else if caret < self.scroll {
+                self.scroll = caret;
+            }
+            // no empty space after the text while scrolled
+            self.scroll = self.scroll.min((width - view).max(0.0)).max(0.0);
         }
-        // no empty space after the text while scrolled
-        self.scroll = self.scroll.min((width - view).max(0.0)).max(0.0);
+        if self.lines.is_some() {
+            let view = self.viewport().height();
+            // the caret is followed only while it shows: a textarea filled from
+            // outside starts at its top
+            if self.focused && area.y1 - self.scroll_y > view {
+                self.scroll_y = area.y1 - view;
+            } else if self.focused && area.y0 < self.scroll_y {
+                self.scroll_y = area.y0;
+            }
+            self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y());
+        }
     }
 
     /// After an edit: publish the value, restart the blink, repaint
@@ -222,9 +321,40 @@ impl TextField {
             return true;
         }
         let key = &press.key;
+        let multiline = self.lines.is_some();
+        // PageUp/PageDown: as many lines as show, less one
+        let page = ((self.viewport().height() / self.line).floor() as usize)
+            .saturating_sub(1)
+            .max(1);
         let (fonts, layouts) = cx.text.contexts();
         let mut d = self.editor.driver(fonts, layouts);
         match key {
+            Key::Named(NamedKey::ArrowUp) if multiline && shift => d.select_up(),
+            Key::Named(NamedKey::ArrowUp) if multiline => d.move_up(),
+            Key::Named(NamedKey::ArrowDown) if multiline && shift => d.select_down(),
+            Key::Named(NamedKey::ArrowDown) if multiline => d.move_down(),
+            Key::Named(NamedKey::PageUp) if multiline => {
+                for _ in 0..page {
+                    if shift { d.select_up() } else { d.move_up() }
+                }
+            }
+            Key::Named(NamedKey::PageDown) if multiline => {
+                for _ in 0..page {
+                    if shift {
+                        d.select_down()
+                    } else {
+                        d.move_down()
+                    }
+                }
+            }
+            // a textarea's Home and End: the line's ends; with Ctrl the text's
+            Key::Named(NamedKey::Home) if multiline && !ctrl && shift => d.select_to_line_start(),
+            Key::Named(NamedKey::Home) if multiline && !ctrl => d.move_to_line_start(),
+            Key::Named(NamedKey::End) if multiline && !ctrl && shift => d.select_to_line_end(),
+            Key::Named(NamedKey::End) if multiline && !ctrl => d.move_to_line_end(),
+            Key::Named(NamedKey::Enter) if multiline && !ctrl => {
+                d.insert_or_replace_selection("\n")
+            }
             Key::Named(NamedKey::ArrowLeft) => match (shift, ctrl) {
                 (true, true) => d.select_word_left(),
                 (true, false) => d.select_left(),
@@ -283,8 +413,12 @@ impl TextField {
             }
             Edit::Paste => {
                 if let Some(pasted) = cx.clipboard.get() {
-                    // one line: line breaks become spaces
-                    let pasted = pasted.replace(['\r', '\n'], " ");
+                    // one line: line breaks become spaces; a textarea keeps them, as \n
+                    let pasted = if self.lines.is_some() {
+                        pasted.replace("\r\n", "\n").replace('\r', "\n")
+                    } else {
+                        pasted.replace(['\r', '\n'], " ")
+                    };
                     d.insert_or_replace_selection(&pasted);
                 }
             }
@@ -310,6 +444,10 @@ struct Char {
     x: f32,
     width: f32,
     space: bool,
+    /// Its line, and the line's top and bottom in the layout
+    line: usize,
+    top: f32,
+    bottom: f32,
 }
 
 impl TextField {
@@ -321,7 +459,8 @@ impl TextField {
         };
         let compose = self.editor.raw_compose().clone().unwrap_or(0..0);
         let mut chars = Vec::new();
-        for line in layout.lines() {
+        for (n, line) in layout.lines().enumerate() {
+            let m = line.metrics();
             let mut x = 0.0;
             for run in line.runs() {
                 for c in run.visual_clusters() {
@@ -333,6 +472,9 @@ impl TextField {
                             x,
                             width: c.advance(),
                             space: c.is_space_or_nbsp(),
+                            line: n,
+                            top: m.block_min_coord,
+                            bottom: m.block_max_coord,
                         });
                     }
                     x += c.advance();
@@ -346,15 +488,15 @@ impl TextField {
     /// The text position (run and character) of a byte offset
     fn position_of(&self, byte: usize) -> accesskit::TextPosition {
         let chars = self.characters();
+        let runs = runs(&chars);
         let i = chars
             .iter()
             .position(|c| c.start >= byte)
             .unwrap_or(chars.len());
         // the end of the text is the end of the last run, not the start of a new one
-        let (run, index) = if i == chars.len() && i > 0 {
-            ((i - 1) / MAX_RUN, (i - 1) % MAX_RUN + 1)
-        } else {
-            (i / MAX_RUN, i % MAX_RUN)
+        let (run, index) = match runs.iter().position(|r| r.contains(&i)) {
+            Some(n) => (n, i - runs[n].start),
+            None => (runs.len() - 1, runs.last().map_or(0, |r| r.len())),
         };
         accesskit::TextPosition {
             node: self.run_ids.get(run).unwrap_or(&self.run_ids[0]).node(),
@@ -366,13 +508,29 @@ impl TextField {
     fn byte_at(&self, pos: &accesskit::TextPosition) -> Option<usize> {
         let run = self.run_ids.iter().position(|id| id.node() == pos.node)?;
         let chars = self.characters();
-        let i = run * MAX_RUN + pos.character_index;
+        let i = runs(&chars).get(run)?.start + pos.character_index;
         Some(
             chars
                 .get(i)
                 .map_or(self.editor.raw_text().len(), |c| c.start),
         )
     }
+}
+
+/// The text runs: a line each (of at most 255 characters – longer lines take
+/// several), as index ranges into the characters; one empty run without text
+fn runs(chars: &[Char]) -> Vec<std::ops::Range<usize>> {
+    let mut out: Vec<std::ops::Range<usize>> = Vec::new();
+    for (i, c) in chars.iter().enumerate() {
+        match out.last_mut() {
+            Some(r) if chars[r.start].line == c.line && r.len() < MAX_RUN => r.end = i + 1,
+            _ => out.push(i..i + 1),
+        }
+    }
+    if out.is_empty() {
+        out.push(0..0);
+    }
+    out
 }
 
 impl Default for TextField {
@@ -407,7 +565,7 @@ impl Widget for TextField {
 
     /// Picks up a value set from outside (not by typing), and repaints after events
     fn update(&mut self, cx: &mut LayoutCx<'_>) -> Change {
-        let style = cx.theme.text_style(TextRole::Body);
+        let style = self.text_style(cx.theme);
         let mut change = Change::NONE;
         if self.style != Some(style) {
             // first update, or another text size: font settings, then the value
@@ -453,7 +611,7 @@ impl Widget for TextField {
         }
         let (fonts, layouts) = cx.text.contexts();
         self.editor.driver(fonts, layouts).refresh_layout();
-        let runs = self.characters().len().div_ceil(MAX_RUN).max(1);
+        let runs = runs(&self.characters()).len();
         while self.run_ids.len() < runs {
             self.run_ids.push(WidgetId::next());
         }
@@ -474,22 +632,32 @@ impl Widget for TextField {
         }
     }
 
-    /// As wide as offered (like a block-level input), 240 px on its own; `--ksl-control` high
+    /// As wide as offered (like a block-level input), 240 px on its own;
+    /// `--ksl-control` high – a textarea its rows and padding
     fn measure(&mut self, cx: &mut LayoutCx<'_>, known: Known, available: Available) -> Size {
         let width = known.width.unwrap_or(match available.width {
             taffy::AvailableSpace::MinContent => 80.0,
             taffy::AvailableSpace::MaxContent => 240.0,
             taffy::AvailableSpace::Definite(w) => w,
         });
-        Size::new(f64::from(width), cx.theme.metrics.control)
+        let height = match self.lines {
+            Some(l) => {
+                let style = self.text_style(cx.theme);
+                l.rows as f64 * f64::from(style.size * style.line_height) + 2.0 * space(2)
+            }
+            None => cx.theme.metrics.control,
+        };
+        Size::new(f64::from(width), height)
     }
 
     fn set_bounds(&mut self, cx: &mut LayoutCx<'_>, bounds: Rect) {
         self.bounds = bounds;
-        let style = cx.theme.text_style(TextRole::Body);
+        let style = self.text_style(cx.theme);
         self.line = f64::from(style.size * style.line_height);
-        let (fonts, layouts) = cx.text.contexts();
-        self.editor.driver(fonts, layouts).refresh_layout();
+        // a textarea's lines break at the width it shows
+        let width = self.wraps().then(|| self.viewport().width() as f32);
+        self.editor.set_width(width);
+        self.refresh(cx.text);
     }
 
     fn bounds(&self) -> Rect {
@@ -558,6 +726,20 @@ impl Widget for TextField {
                 self.edited(cx);
             }
             Event::PointerUp(_) => self.dragging = false,
+            // a textarea scrolls its lines; at its ends the scroll goes on to the page
+            Event::Scroll(delta) if self.lines.is_some() => {
+                let dy = match *delta {
+                    ScrollDelta::Lines(v) => v.y * self.line * 3.0,
+                    ScrollDelta::Pixels(v) => v.y,
+                    ScrollDelta::Lifted => 0.0,
+                };
+                let to = (self.scroll_y + dy).clamp(0.0, self.max_scroll_y());
+                if to != self.scroll_y {
+                    self.scroll_y = to;
+                    self.repaint = true;
+                    cx.handled = true;
+                }
+            }
             Event::Focus { focused, visible } => {
                 let gained = *focused && !self.focused;
                 self.focused = *focused;
@@ -623,7 +805,11 @@ impl Widget for TextField {
     }
 
     fn accessibility(&self) -> Option<accesskit::Node> {
-        let mut node = accesskit::Node::new(accesskit::Role::TextInput);
+        let mut node = accesskit::Node::new(if self.lines.is_some() {
+            accesskit::Role::MultilineTextInput
+        } else {
+            accesskit::Role::TextInput
+        });
         node.set_value(self.synced.clone());
         if !self.label.shown.is_empty() {
             node.set_label(self.label.shown.clone());
@@ -662,15 +848,13 @@ impl Widget for TextField {
         let text = self.editor.raw_text();
         let o = self.text_origin();
         let mut prev_space = true;
-        let chunks: Vec<&[Char]> = if chars.is_empty() {
-            vec![&[]]
-        } else {
-            chars.chunks(MAX_RUN).collect()
-        };
-        chunks
+        // an empty text: one empty run where the first line is
+        let empty_line = (0.0, self.line as f32);
+        runs(&chars)
             .into_iter()
             .zip(&self.run_ids)
-            .map(|(chunk, id)| {
+            .map(|(range, id)| {
+                let chunk = &chars[range];
                 let mut node = accesskit::Node::new(accesskit::Role::TextRun);
                 let value: String = chunk
                     .iter()
@@ -679,11 +863,12 @@ impl Widget for TextField {
                 node.set_value(value);
                 let x0 = chunk.first().map_or(0.0, |c| c.x);
                 let x1 = chunk.last().map_or(0.0, |c| c.x + c.width);
+                let (top, bottom) = chunk.first().map_or(empty_line, |c| (c.top, c.bottom));
                 node.set_bounds(accessible_rect(Rect::new(
                     o.x + f64::from(x0),
-                    o.y,
+                    o.y + f64::from(top),
                     o.x + f64::from(x1),
-                    o.y + self.line,
+                    o.y + f64::from(bottom),
                 )));
                 node.set_character_lengths(chunk.iter().map(|c| c.len as u8).collect::<Vec<u8>>());
                 node.set_character_positions(chunk.iter().map(|c| c.x - x0).collect::<Vec<f32>>());
@@ -765,6 +950,19 @@ impl Widget for TextField {
             ctx.fill_rect(&at(b));
         }
         ctx.pop_clip();
+        // a textarea with more lines than it shows: a thin thumb at its end
+        let max = self.max_scroll_y();
+        if max > 0.0 {
+            let view = self.viewport();
+            let track = Rect::new(r.x1 - 6.0, view.y0, r.x1 - 3.0, view.y1);
+            let h = (track.height() * view.height() / (view.height() + max)).max(16.0);
+            let y = track.y0 + (track.height() - h) * self.scroll_y / max;
+            ctx.set_paint(theme.text_3.multiply_alpha(0.45));
+            ctx.fill_path(&paint::rounded(
+                Rect::new(track.x0, y, track.x1, y + h),
+                1.5,
+            ));
+        }
     }
 }
 
@@ -788,9 +986,17 @@ mod tests {
 
     impl Harness {
         fn new(initial: &str) -> Self {
+            Self::with(TextField::new(), initial, 40.0)
+        }
+
+        fn textarea(initial: &str) -> Self {
+            Self::with(Textarea::new().rows(3), initial, 88.0)
+        }
+
+        fn with(field: TextField, initial: &str, height: f64) -> Self {
             let value = ArcRwSignal::new(initial.to_string());
-            let mut field = TextField::new().value(value.clone());
-            lay_out(&mut field, Size::new(300.0, 40.0));
+            let mut field = field.value(value.clone());
+            lay_out(&mut field, Size::new(300.0, height));
             let mut h = Self {
                 field,
                 value,
@@ -982,5 +1188,55 @@ mod tests {
             character_index: 5,
         };
         assert_eq!(h.field.byte_at(&pos), Some(MAX_RUN + 5));
+    }
+
+    #[test]
+    fn a_textarea_takes_line_breaks_and_moves_by_lines() {
+        let submitted = std::rc::Rc::new(std::cell::Cell::new(false));
+        let mut h = Harness::textarea("");
+        let flag = submitted.clone();
+        h.field.on_submit = Some(Box::new(move |_| flag.set(true)));
+        h.typ("one");
+        h.named(NamedKey::Enter, ModifiersState::empty());
+        h.typ("two");
+        assert_eq!(h.value.get_untracked(), "one\ntwo");
+        assert!(!submitted.get(), "Enter starts a line");
+        h.named(NamedKey::Enter, ModifiersState::CONTROL);
+        assert!(submitted.get(), "Ctrl+Enter submits");
+
+        // Up goes to the line above, Home and End stay on the line
+        h.named(NamedKey::ArrowUp, ModifiersState::empty());
+        h.named(NamedKey::End, ModifiersState::empty());
+        h.typ("!");
+        assert_eq!(h.value.get_untracked(), "one!\ntwo");
+        h.named(NamedKey::ArrowDown, ModifiersState::empty());
+        h.named(NamedKey::Home, ModifiersState::empty());
+        h.typ(">");
+        assert_eq!(h.value.get_untracked(), "one!\n>two");
+
+        // pasted line breaks stay, as \n
+        h.clipboard = Clipboard::fixed("a\r\nb");
+        h.key(
+            Key::Character("v".into()),
+            Some("v"),
+            ModifiersState::CONTROL,
+        );
+        assert_eq!(h.value.get_untracked(), "one!\n>a\nbtwo");
+    }
+
+    #[test]
+    fn a_textarea_reads_line_by_line() {
+        let mut h = Harness::textarea("first line\nsecond");
+        h.update();
+        let runs = h.field.accessibility_children();
+        assert_eq!(runs.len(), 2, "a run per line");
+        let joined: String = runs.iter().map(|(_, n)| n.value().unwrap()).collect();
+        assert_eq!(joined, "first line\nsecond");
+        let (a, b) = (runs[0].1.bounds().unwrap(), runs[1].1.bounds().unwrap());
+        assert!(b.y0 >= a.y1 - 0.5, "the second line is below the first");
+        assert_eq!(
+            h.field.accessibility().unwrap().role(),
+            accesskit::Role::MultilineTextInput
+        );
     }
 }

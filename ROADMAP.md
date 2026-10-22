@@ -104,7 +104,12 @@ What most desktop apps need first, settings dialogs above all.
   navigation (a flat accent tint); icons, icon-only options with names, Sm/Md/Lg. A radio group for
   assistive technology (arrows, one Tab stop); `ToggleGroup` makes every chosen option its own knob. Open:
   Kiesel's single `Toggle` (a toggle group of one), wrapping plain options. Gallery page: `segmented`.
-- [ ] **M** `Textarea` – TextField over several lines: line navigation, vertical scrolling (needs D1 scrolling).
+- [x] **M** `Textarea` – TextField over several lines (`Textarea::new()`, `.rows(n)`, 5 by default): lines wrap
+  at the field's width, the text scrolls to keep the caret in view and by wheel and touchpad (at its ends the
+  page scrolls on), a thin thumb shows where; Up/Down by lines, PageUp/PageDown by what shows, Home/End within
+  the line (Ctrl: the text), Enter starts a line, Ctrl+Enter submits, pasted line breaks stay. `mono` for code:
+  monospace at 0.9 em, unwrapped, scrolling sideways. A multi-line entry for assistive technology, one text run
+  per line. Open: the resize handle, a draggable scrollbar, TextField sizes (Sm/Lg). Gallery page: `textarea`.
 - [ ] **M** `NumberField` (steppers, Up/Down) and `PasswordField` (reveal, no copy).
 - [ ] **L** `Select` and the combobox (`TextField` with options) on a shared option list – search, groups,
   keyboard, multiple – on D1 popups.

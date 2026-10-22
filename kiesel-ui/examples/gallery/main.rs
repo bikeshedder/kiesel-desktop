@@ -55,6 +55,11 @@ pub const PAGES: &[Page] = &[
         make: pages::field::page,
     },
     Page {
+        id: "textarea",
+        title: "Textarea",
+        make: pages::textarea::page,
+    },
+    Page {
         id: "choices",
         title: "Choices",
         make: pages::choices::page,

@@ -45,7 +45,7 @@ pub use scroll::Scroll;
 pub use segmented::{Segment, SegmentedControl, ToggleGroup};
 pub use shell::{Options, run};
 pub use shortcut::{IntoShortcut, KeyPress, Mods, Shortcut, Shortcuts, Trigger};
-pub use text_field::TextField;
+pub use text_field::{TextField, Textarea};
 pub use theme::{Appearance, ControlSize, Scheme, TextRole, Theme, space};
 pub use theme_switch::{IconToggle, ThemeSwitch};
 pub use theming::{SystemPrefs, ThemeMode, Theming};
