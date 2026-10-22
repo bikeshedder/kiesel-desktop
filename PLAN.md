@@ -91,6 +91,7 @@ wrapping on resize, that animation frames redraw only a small region, and that p
 `tests/list-demo.sh` scrolls by wheel, touchpad (momentum), keys and scrollbar, and checks AT-SPI scrollTo;
 `tests/todo-demo.sh` adds and removes widgets at runtime and watches memory.
 `tests/theme-demo.sh` follows a (fake) system preference, chooses, saves and restores the theme.
+`tests/segmented-demo.sh` covers segmented controls (knob, keyboard, optional value, plain) and toggle groups.
 `tests/choices-demo.sh` drives checkboxes, radios and switches by pointer and keyboard, with errors.
 `tests/field-demo.sh` checks names from labels, descriptions, required, label clicks and errors as they come and go.
 `tests/icons-demo.sh` checks icon-only buttons, the accessibility of icons and the spinner in the icon's place.

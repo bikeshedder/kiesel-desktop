@@ -47,22 +47,23 @@ impl<T> Choice<T> {
 
 type Handler<V> = Rc<RefCell<Option<Box<dyn FnMut(V)>>>>;
 
-/// What both groups share: the rows, the field's link, the layout
-struct Group {
-    id: WidgetId,
-    children: Vec<Box<dyn Widget>>,
-    size: ControlSize,
+/// What the groups share (also the segmented controls): the options, the
+/// field's link, the layout
+pub(crate) struct Group {
+    pub(crate) id: WidgetId,
+    pub(crate) children: Vec<Box<dyn Widget>>,
+    pub(crate) size: ControlSize,
     horizontal: bool,
-    field: Option<FieldLink>,
+    pub(crate) field: Option<FieldLink>,
     watch: Option<Watch>,
     /// The field's state as of the last update
-    invalid: bool,
+    pub(crate) invalid: bool,
     described: String,
-    bounds: Rect,
+    pub(crate) bounds: Rect,
 }
 
 impl Group {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             id: WidgetId::next(),
             children: Vec::new(),
@@ -76,13 +77,13 @@ impl Group {
         }
     }
 
-    fn invalid_signal(&self) -> ArcSignal<bool> {
+    pub(crate) fn invalid_signal(&self) -> ArcSignal<bool> {
         self.field
             .as_ref()
             .map_or_else(|| ArcSignal::stored(false), |f| f.invalid.clone())
     }
 
-    fn mount(&mut self, cx: &mut MountCx<'_>) {
+    pub(crate) fn mount(&mut self, cx: &mut MountCx<'_>) {
         if let Some(f) = self.field.clone() {
             self.watch = Some(cx.watch(self.id, move || {
                 f.invalid.track();
@@ -91,7 +92,7 @@ impl Group {
         }
     }
 
-    fn update(&mut self) -> Change {
+    pub(crate) fn update(&mut self) -> Change {
         let Some(f) = &self.field else {
             return Change::NONE;
         };
@@ -134,7 +135,7 @@ impl Group {
         }
     }
 
-    fn accessibility(&self, role: accesskit::Role) -> accesskit::Node {
+    pub(crate) fn accessibility(&self, role: accesskit::Role) -> accesskit::Node {
         let mut node = accesskit::Node::new(role);
         if let Some(f) = &self.field {
             node.push_labelled_by(f.label.node());

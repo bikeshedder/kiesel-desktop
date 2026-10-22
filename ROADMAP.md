@@ -95,7 +95,12 @@ What most desktop apps need first, settings dialogs above all.
   (indeterminate while some are); in a radio group only the chosen option is a Tab stop
   (`Widget::tab_stop`) and the arrows choose and move focus (`EventCx::request_focus`). Open: disabled options,
   CheckboxGroup's columns, filter, groups and cards, the radio legend's small caps. Example: `choices`.
-- [ ] **S** `SegmentedControl` / `ToggleGroup` – e.g. System · Light · Dark next to the ThemeSwitch.
+- [x] **S** `SegmentedControl` / `ToggleGroup` – e.g. System · Light · Dark next to the ThemeSwitch. A sunken
+  well drawn around the buttons (they line up with a plain button), equal columns, a knob sliding with the
+  spring; a default that holds while none is chosen (a ghost knob) and `on_clear`; the `plain` variant for
+  navigation (a flat accent tint); icons, icon-only options with names, Sm/Md/Lg. A radio group for
+  assistive technology (arrows, one Tab stop); `ToggleGroup` makes every chosen option its own knob. Open:
+  Kiesel's single `Toggle` (a toggle group of one), wrapping plain options. Example: `segmented`.
 - [ ] **M** `Textarea` – TextField over several lines: line navigation, vertical scrolling (needs D1 scrolling).
 - [ ] **M** `NumberField` (steppers, Up/Down) and `PasswordField` (reveal, no copy).
 - [ ] **L** `Select` and the combobox (`TextField` with options) on a shared option list – search, groups,
