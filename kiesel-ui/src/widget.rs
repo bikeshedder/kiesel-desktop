@@ -79,6 +79,10 @@ pub enum Event {
     Scroll(ScrollDelta),
     /// One of its [`Widget::shortcuts`] was pressed (and no focused widget used it)
     Shortcut(Shortcut),
+    /// The time it asked for with [`Widget::wake_at`] has come (a held stepper repeats)
+    Tick,
+    /// Assistive technology steps a value up (1) or down (-1)
+    Step(i8),
 }
 
 /// How far to scroll, in logical pixels or lines; positive = towards the end
@@ -576,20 +580,26 @@ pub(crate) fn update_all(
 }
 
 /// The earliest [`Widget::wake_at`] in the tree, and the inks of the widgets that asked
+/// The widgets waiting for a time: the earliest time, their inks, and those
+/// whose time has come (`due`)
 pub(crate) fn wakes(
     w: &dyn Widget,
     now: Instant,
     next: &mut Option<Instant>,
     inks: &mut Vec<Rect>,
+    due: &mut Vec<WidgetId>,
 ) {
     if let Some(t) = w.wake_at(now) {
         inks.push(w.ink());
+        if t <= now {
+            due.push(w.id());
+        }
         if next.is_none_or(|n| t < n) {
             *next = Some(t);
         }
     }
     for child in w.children() {
-        wakes(child.as_ref(), now, next, inks);
+        wakes(child.as_ref(), now, next, inks, due);
     }
 }
 

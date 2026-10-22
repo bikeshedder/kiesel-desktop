@@ -33,6 +33,7 @@
 #   kiesel-headless a11y value <name>                     its value (text fields)
 #   kiesel-headless a11y set <name> = <value>             set its value, as a screen reader would
 #   kiesel-headless a11y caret <name> [= offset]          print (or move) its caret, in characters
+#   kiesel-headless a11y number <name> [= n]             a spin button's value min max (or set it)
 #   kiesel-headless a11y info <name>                      its description, then its states (one a line)
 #   kiesel-headless a11y scrollto <name>                  ask to scroll it into view (Component.ScrollTo)
 #   kiesel-headless stop
@@ -259,6 +260,13 @@ elif verb == "focus":
 elif verb == "value":
     text = acc.queryText()
     print(text.getText(0, text.characterCount))
+elif verb == "number":
+    # a spin button's value through AT-SPI's Value interface: print it, or set it
+    v = acc.queryValue()
+    if value is None:
+        print(f"{v.currentValue:g} {v.minimumValue:g} {v.maximumValue:g}")
+    else:
+        v.currentValue = float(value)
 elif verb == "info":
     # its description and states, one per line: "description: …", "required", …
     print(f"description: {acc.description}")

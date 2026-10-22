@@ -76,7 +76,8 @@ kiesel-headless key shift+Tab         # also: keydown, keyup, type <text> (us la
 kiesel-headless ime preedit ありが     # act as the input method: also commit, clear, delete <b> <a>
 kiesel-headless a11y                  # AT-SPI tree
 kiesel-headless a11y click "Save changes"   # also: focus, where (centre), box (x y w h) <name>
-kiesel-headless a11y set --role entry Name = Text   # also: value, caret [= offset], info (description, states)
+kiesel-headless a11y set --role entry Name = Text   # also: value, caret [= offset], info (description, states),
+                                      # number (a spin button's value min max, or = n to set it)
 kiesel-headless portal dark           # the system's colour scheme, from a fake XDG portal; also
                                       # accent R G B, contrast high, motion reduce, text-scale 1.5
 kiesel-headless stop
@@ -94,6 +95,7 @@ hold across pages; the other tests open their page alone (`KIESEL_PAGE`).
 `tests/list-demo.sh` scrolls by wheel, touchpad (momentum), keys and scrollbar, and checks AT-SPI scrollTo;
 `tests/todo-demo.sh` adds and removes widgets at runtime and watches memory.
 `tests/theme-demo.sh` follows a (fake) system preference, chooses, saves and restores the theme.
+`tests/inputs-demo.sh` steps, clamps and types numbers (also through AT-SPI's Value), hides and shows passwords.
 `tests/variants-demo.sh` checks button sizes, toggles, disabled buttons, groups and colours.
 `tests/textarea-demo.sh` edits across lines, scrolls by caret and wheel, submits with Ctrl+Enter, checks the limit.
 `tests/segmented-demo.sh` covers segmented controls (knob, keyboard, optional value, plain) and toggle groups.

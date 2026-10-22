@@ -110,7 +110,15 @@ What most desktop apps need first, settings dialogs above all.
   the line (Ctrl: the text), Enter starts a line, Ctrl+Enter submits, pasted line breaks stay. `mono` for code:
   monospace at 0.9 em, unwrapped, scrolling sideways. A multi-line entry for assistive technology, one text run
   per line. Open: the resize handle, a draggable scrollbar, TextField sizes (Sm/Lg). Gallery page: `textarea`.
-- [ ] **M** `NumberField` (steppers, Up/Down) and `PasswordField` (reveal, no copy).
+- [x] **M** `NumberField` (steppers, Up/Down) and `PasswordField` (reveal, no copy). NumberField: `Option<f64>`,
+  min/max/step/unit, −/+ in the well (attached, take no focus, repeat while held – faster the longer; disabled
+  at the limits), Up/Down (Shift: ten), clamped when left, written the language's way (decimal comma in German,
+  re-written when the language changes); a spin button with value, limits, Increment/Decrement and AT-SPI's
+  Value. PasswordField: bullets while hidden (no copy or cut, no input method, Ctrl+arrows to the ends, bullets
+  for assistive technology), the eye shows it (crossed out, pressed), a Caps Lock note while hidden (guessed
+  from keys – winit doesn't report it); `confirm()` without an eye. TextField gained trailing widgets, end
+  alignment and hooks; widgets can be woken for an action (`Event::Tick`). Open: units to choose from, the
+  duration format, TextField sizes. Gallery page: `inputs`.
 - [ ] **L** `Select` and the combobox (`TextField` with options) on a shared option list – search, groups,
   keyboard, multiple – on D1 popups.
 - [ ] **M** `Slider`.

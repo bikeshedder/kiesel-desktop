@@ -902,10 +902,21 @@ impl Shell {
                     self.send(id, Event::SetTextSelection(sel));
                 }
             }
-            accesskit::Action::SetValue => {
-                if let Some(accesskit::ActionData::Value(v)) = request.data {
+            accesskit::Action::SetValue => match request.data {
+                Some(accesskit::ActionData::Value(v)) => {
                     self.send(id, Event::SetValue(v.into()));
                 }
+                // a number (AT-SPI's Value interface): as text, the way a person types it
+                Some(accesskit::ActionData::NumericValue(n)) => {
+                    self.send(id, Event::SetValue(crate::number_field::format(n)));
+                }
+                _ => {}
+            },
+            accesskit::Action::Increment => {
+                self.send(id, Event::Step(1));
+            }
+            accesskit::Action::Decrement => {
+                self.send(id, Event::Step(-1));
             }
             accesskit::Action::Focus => {
                 let focusable = widget::find(self.root.as_ref(), id).is_some_and(|w| w.focusable());
@@ -1270,13 +1281,28 @@ impl ApplicationHandler for Shell {
     /// widgets that asked for it (a blinking caret); then sleep until the next one
     fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         let now = Instant::now();
-        let (mut next, mut inks) = (None, Vec::new());
-        widget::wakes(self.root.as_ref(), now, &mut next, &mut inks);
+        let (mut next, mut inks, mut due) = (None, Vec::new(), Vec::new());
+        widget::wakes(self.root.as_ref(), now, &mut next, &mut inks, &mut due);
         if self.wake.is_some_and(|t| t <= now) {
             for r in inks {
                 self.add_damage(r);
             }
             self.request_redraw();
+        }
+        if !due.is_empty() {
+            // their time has come: they may act (and ask again)
+            for id in due {
+                self.send(id, Event::Tick);
+            }
+            self.changed();
+            next = None;
+            widget::wakes(
+                self.root.as_ref(),
+                now,
+                &mut next,
+                &mut Vec::new(),
+                &mut Vec::new(),
+            );
         }
         self.wake = next;
         event_loop.set_control_flow(next.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));

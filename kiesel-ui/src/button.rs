@@ -153,8 +153,9 @@ pub struct Button {
     variant: Variant,
     color: Option<ButtonColor>,
     size: ControlSize,
-    /// A height of its own instead of its size's (steppers inside a field)
+    /// A height and corners of its own instead of its size's (steppers inside a field)
     pub(crate) height: Option<f64>,
+    pub(crate) radius: Option<f64>,
     round: bool,
     /// In an attached group: no body of its own
     pub(crate) segment: Option<Segment>,
@@ -170,11 +171,21 @@ pub struct Button {
     on_click: Option<Box<dyn FnMut()>>,
     /// Before and after the label
     icon: Option<IconNode>,
+    /// The leading icon while pressed (an eye, crossed out while the password shows)
+    pub(crate) icon_pressed: Option<IconNode>,
     icon_end: Option<IconNode>,
     /// Square, the icon alone; the label only names it for assistive technology
     icon_only: bool,
-    /// Not in the Tab order (steppers: the field's own keys do the same)
-    pub(crate) skip_tab: bool,
+    /// Never focused – a press leaves focus where it is (steppers: the field
+    /// keeps it, its own keys do the same)
+    pub(crate) unfocusable: bool,
+    /// A width of its own (steppers: a little wider than high)
+    pub(crate) width: Option<f64>,
+    /// Acts on press, and again and again while held (steppers)
+    pub(crate) repeat: bool,
+    /// When a held press acts next, and how often it has
+    repeat_at: Option<Instant>,
+    repeats: u32,
     /// Press it from anywhere in the window
     shortcuts: Vec<Shortcut>,
     hovered: bool,
@@ -205,6 +216,7 @@ impl Button {
             color: None,
             size: ControlSize::Md,
             height: None,
+            radius: None,
             round: false,
             segment: None,
             loading: ArcSignal::stored(false),
@@ -218,9 +230,14 @@ impl Button {
             shortcuts: Vec::new(),
             on_click: None,
             icon: None,
+            icon_pressed: None,
             icon_end: None,
             icon_only: false,
-            skip_tab: false,
+            unfocusable: false,
+            width: None,
+            repeat: false,
+            repeat_at: None,
+            repeats: 0,
             hovered: false,
             pointer_armed: false,
             key_armed: false,
@@ -335,7 +352,11 @@ impl Button {
                 SPINNER_BOX_EM
             };
             items.push((Item::Spinner, size * em));
-        } else if let Some(icon) = self.icon {
+        } else if let Some(icon) = self
+            .icon_pressed
+            .filter(|_| self.shown_pressed)
+            .or(self.icon)
+        {
             items.push((Item::Icon(icon), lead * em));
         }
         if !self.icon_only {
@@ -357,7 +378,9 @@ impl Button {
     }
 
     fn radius(&self, theme: &Theme) -> f64 {
-        if self.round {
+        if let Some(r) = self.radius {
+            r
+        } else if self.round {
             self.bounds.height() / 2.0
         } else {
             dims(theme, self.size).3
@@ -607,7 +630,7 @@ impl Widget for Button {
             .layout
             .get_or_insert_with(|| cx.text.line(&self.label.shown, &style));
         if self.icon_only {
-            return Size::new(h, h);
+            return Size::new(self.width.unwrap_or(h), h);
         }
         let (label_w, label_h) = (f64::from(layout.width()), f64::from(layout.height()));
         let items = self.items(f64::from(font), label_w);
@@ -644,11 +667,12 @@ impl Widget for Button {
     }
 
     fn focusable(&self) -> bool {
-        !self.shown_disabled
+        !self.shown_disabled && !self.unfocusable
     }
 
-    fn tab_stop(&self) -> bool {
-        !self.shown_disabled && !self.skip_tab
+    /// While held, a repeating button wants to act again
+    fn wake_at(&self, _now: Instant) -> Option<Instant> {
+        self.repeat_at.filter(|_| self.pointer_armed)
     }
 
     fn shortcuts(&self) -> &[Shortcut] {
@@ -672,10 +696,32 @@ impl Widget for Button {
             Event::PointerMove(p) => self.hovered = self.hit_point(*p),
             Event::PointerDown(p) => {
                 self.pointer_armed = !self.shown_disabled && self.hit_point(*p);
+                if self.pointer_armed && self.repeat {
+                    // a stepper: once at once, held it repeats after 400 ms –
+                    // faster the longer it is held
+                    self.activate();
+                    self.repeats = 0;
+                    self.repeat_at = Some(cx.now + std::time::Duration::from_millis(400));
+                }
+            }
+            Event::Tick => {
+                if self.pointer_armed && self.hovered && !self.shown_disabled {
+                    self.activate();
+                    self.repeats += 1;
+                    let ms = match self.repeats {
+                        0..5 => 120,
+                        5..20 => 60,
+                        _ => 30,
+                    };
+                    self.repeat_at = Some(cx.now + std::time::Duration::from_millis(ms));
+                } else {
+                    self.repeat_at = None;
+                }
             }
             Event::PointerUp(p) => {
-                let click = self.pointer_armed && self.hit_point(*p);
+                let click = self.pointer_armed && self.hit_point(*p) && !self.repeat;
                 self.pointer_armed = false;
+                self.repeat_at = None;
                 if click {
                     self.activate();
                 }
@@ -731,7 +777,9 @@ impl Widget for Button {
             node.set_disabled();
         } else {
             node.add_action(accesskit::Action::Click);
-            node.add_action(accesskit::Action::Focus);
+            if !self.unfocusable {
+                node.add_action(accesskit::Action::Focus);
+            }
         }
         if self.pressed.is_some() {
             node.set_toggled(if self.shown_pressed {
@@ -866,6 +914,8 @@ pub struct ButtonGroup {
     attached: bool,
     vertical: bool,
     size: ControlSize,
+    /// Corners of its own (steppers inside a field follow the field's)
+    pub(crate) radius: Option<f64>,
     label: Option<TextProp>,
     watch: Option<Watch>,
     bounds: Rect,
@@ -880,6 +930,7 @@ impl ButtonGroup {
             attached: true,
             vertical: false,
             size: ControlSize::Md,
+            radius: None,
             label: None,
             watch: None,
             bounds: Rect::ZERO,
@@ -976,7 +1027,6 @@ impl Widget for ButtonGroup {
                 taffy::FlexDirection::Row
             },
             align_items: taffy::AlignItems::STRETCH,
-            align_self: Some(taffy::AlignSelf::START),
             gap: taffy::Size {
                 width: gap,
                 height: gap,
@@ -1012,7 +1062,7 @@ impl Widget for ButtonGroup {
     fn paint(&self, cx: &mut PaintCx<'_>) {
         if self.attached && !self.children.is_empty() {
             let (ctx, theme) = (&mut *cx.ctx, cx.theme);
-            let (r, radius) = (self.bounds, dims(theme, self.size).3);
+            let (r, radius) = (self.bounds, self.radius.unwrap_or(dims(theme, self.size).3));
             paint::outer_shadows(ctx, r, radius, &theme.control_shadow, 1.0);
             let [top, bottom] = theme.control_bg;
             ctx.set_paint(

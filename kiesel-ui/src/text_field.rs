@@ -25,6 +25,7 @@ use parley::editing::{Cursor, PlainEditor, Selection};
 use parley::{FontFamily, FontWeight, LineHeight, StyleProperty};
 use reactive_graph::signal::ArcRwSignal;
 use reactive_graph::traits::{GetUntracked, Set, Track, WithUntracked};
+use reactive_graph::wrappers::read::ArcSignal;
 use vello_cpu::kurbo::{Point, Rect, Size};
 use winit::cursor::CursorIcon;
 use winit::keyboard::{Key, NamedKey};
@@ -44,10 +45,25 @@ use crate::widget::{
 
 /// Called with the text when Enter is pressed
 type OnSubmit = Box<dyn FnMut(&str)>;
+/// Hears the text typed (not set from outside)
+type OnInput = Box<dyn FnMut(&str)>;
+/// Sees a key before the field: true if it used it (a number field's Up/Down)
+type OnKey = Box<dyn FnMut(&KeyPress) -> bool>;
+
+/// A number field, for assistive technology: a spin button
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Spin {
+    pub value: Option<f64>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub step: f64,
+}
 
 const BLINK: Duration = Duration::from_millis(500);
 const BLINK_FOR: Duration = Duration::from_secs(10);
 const CARET_WIDTH: f32 = 1.5;
+/// What a hidden password shows for each character
+const BULLET: char = '•';
 
 /// A textarea: how many lines show, and whether it holds code
 #[derive(Clone, Copy)]
@@ -110,6 +126,28 @@ pub struct TextField {
     bounds: Rect,
     /// A textarea's rows and font; `None`: one line
     lines: Option<Lines>,
+    /// Widgets at the end of the well: steppers, a unit, a button
+    pub(crate) trailing: Vec<Box<dyn Widget>>,
+    /// The text at the end of the line (numbers)
+    pub(crate) align_end: bool,
+    pub(crate) on_key: Option<OnKey>,
+    /// Focus left (a number field clamps its value)
+    pub(crate) on_blur: Option<Box<dyn FnMut()>>,
+    /// The text changed by typing (not from outside)
+    pub(crate) on_input: Option<OnInput>,
+    /// Assistive technology stepped the value
+    pub(crate) on_step: Option<Box<dyn FnMut(i8)>>,
+    /// A number field: what a spin button reports
+    pub(crate) spin: Option<Box<dyn Fn() -> Spin>>,
+    /// A password: hidden behind bullets while this is true
+    pub(crate) mask: Option<ArcSignal<bool>>,
+    shown_mask: bool,
+    /// The bullets shown for a hidden password, and their layout
+    bullet_text: String,
+    bullets: Option<parley::Layout<()>>,
+    /// Caps Lock seems on (a hidden password warns about it)
+    pub(crate) on_caps: Option<Box<dyn FnMut(bool)>>,
+    caps: bool,
     /// How far the text is scrolled left to keep the caret in view
     scroll: f64,
     /// How far a textarea's text is scrolled up
@@ -146,6 +184,19 @@ impl TextField {
             on_submit: None,
             bounds: Rect::ZERO,
             lines: None,
+            trailing: Vec::new(),
+            align_end: false,
+            on_key: None,
+            on_blur: None,
+            on_input: None,
+            on_step: None,
+            spin: None,
+            mask: None,
+            shown_mask: false,
+            bullet_text: String::new(),
+            bullets: None,
+            on_caps: None,
+            caps: false,
             scroll: 0.0,
             scroll_y: 0.0,
             line: 24.0,
@@ -206,19 +257,86 @@ impl TextField {
     }
 
     /// Where the text starts, in window coordinates: the line centred in the
-    /// well; a textarea's first line at the top, scrolled
+    /// well (at its end when aligned so); a textarea's first line at the top, scrolled
     fn text_origin(&self) -> Point {
         let y = match self.lines {
             Some(_) => self.bounds.y0 + space(2) - self.scroll_y,
             None => self.bounds.y0 + (self.bounds.height() - self.line) / 2.0,
         };
-        Point::new(self.bounds.x0 + space(3) - self.scroll, y)
+        let view = self.viewport();
+        let end = if self.align_end {
+            let width = self
+                .editor
+                .try_layout()
+                .map_or(0.0, |l| f64::from(l.width()));
+            (view.width() - width - f64::from(CARET_WIDTH)).max(0.0)
+        } else {
+            0.0
+        };
+        Point::new(view.x0 + end - self.scroll, y)
     }
 
-    /// The text box the field shows (inside its padding)
+    /// The text box the field shows: inside its padding, before what trails it
     fn viewport(&self) -> Rect {
         let pad_y = if self.lines.is_some() { space(2) } else { 0.0 };
-        self.bounds.inflate(-space(3), -pad_y)
+        let mut view = self.bounds.inflate(-space(3), -pad_y);
+        if let Some(start) = trailing_start(&self.trailing) {
+            view.x1 = (start - space(2)).max(view.x0);
+        }
+        view
+    }
+
+    /// The layout drawn: the text, or a hidden password's bullets
+    fn shown_layout(&self) -> Option<&parley::Layout<()>> {
+        if self.shown_mask {
+            self.bullets.as_ref()
+        } else {
+            self.editor.try_layout()
+        }
+    }
+
+    /// The text drawn
+    fn shown_text(&self) -> &str {
+        if self.shown_mask {
+            &self.bullet_text
+        } else {
+            self.editor.raw_text()
+        }
+    }
+
+    /// A byte offset in the text, in the text drawn (a bullet a character)
+    fn to_shown(&self, real: usize) -> usize {
+        if self.shown_mask {
+            let real = real.min(self.editor.raw_text().len());
+            self.editor.raw_text()[..real].chars().count() * BULLET.len_utf8()
+        } else {
+            real
+        }
+    }
+
+    /// A byte offset in the text drawn, in the text
+    fn to_real(&self, shown: usize) -> usize {
+        if self.shown_mask {
+            let text = self.editor.raw_text();
+            text.char_indices()
+                .nth(shown / BULLET.len_utf8())
+                .map_or(text.len(), |(i, _)| i)
+        } else {
+            shown
+        }
+    }
+
+    /// The caret's box in the layout drawn
+    fn caret_box(&self) -> Option<Rect> {
+        if !self.shown_mask {
+            let a = self.editor.ime_cursor_area();
+            return Some(Rect::new(a.x0, a.y0, a.x1, a.y1));
+        }
+        let layout = self.bullets.as_ref()?;
+        let at = self.to_shown(self.editor.raw_selection().focus().index());
+        let b =
+            Cursor::from_byte_index(layout, at, Affinity::Downstream).geometry(layout, CARET_WIDTH);
+        Some(Rect::new(b.x0, b.y0, b.x1, b.y1))
     }
 
     /// Lines wrap: a textarea, unless it holds code
@@ -254,11 +372,28 @@ impl TextField {
     fn refresh(&mut self, text: &mut Text) {
         let (fonts, layouts) = text.contexts();
         self.editor.driver(fonts, layouts).refresh_layout();
-        let Some(layout) = self.editor.try_layout() else {
+        if self.shown_mask {
+            let n = self.editor.raw_text().chars().count();
+            if self.bullets.is_none() || self.bullet_text.chars().count() != n {
+                self.bullet_text = BULLET.to_string().repeat(n);
+                // the editor's font (set at the first update)
+                let style = self.style.unwrap_or(TextStyle {
+                    family: "system-ui",
+                    size: 16.0,
+                    weight: 400.0,
+                    letter_spacing: 0.0,
+                    line_height: 1.5,
+                });
+                self.bullets = Some(text.line(&self.bullet_text, &style));
+            }
+        }
+        let Some(layout) = self.shown_layout() else {
             return;
         };
         let width = f64::from(layout.width());
-        let area = self.editor.ime_cursor_area();
+        let Some(area) = self.caret_box() else {
+            return;
+        };
         if self.wraps() {
             self.scroll = 0.0;
         } else {
@@ -291,6 +426,9 @@ impl TextField {
         let text = self.plain_text();
         if text != self.synced {
             self.synced = text.clone();
+            if let Some(f) = &mut self.on_input {
+                f(&text);
+            }
             self.value.set(text);
         }
         self.blink_from = cx.now;
@@ -322,6 +460,9 @@ impl TextField {
         }
         let key = &press.key;
         let multiline = self.lines.is_some();
+        // a hidden password doesn't tell its words apart: Ctrl moves to its ends
+        let (masked, ctrl) = (self.shown_mask, ctrl && !self.shown_mask);
+        let to_end = cx.modifiers.control_key() && masked;
         // PageUp/PageDown: as many lines as show, less one
         let page = ((self.viewport().height() / self.line).floor() as usize)
             .saturating_sub(1)
@@ -355,6 +496,10 @@ impl TextField {
             Key::Named(NamedKey::Enter) if multiline && !ctrl => {
                 d.insert_or_replace_selection("\n")
             }
+            Key::Named(NamedKey::ArrowLeft) if to_end && shift => d.select_to_text_start(),
+            Key::Named(NamedKey::ArrowLeft) if to_end => d.move_to_text_start(),
+            Key::Named(NamedKey::ArrowRight) if to_end && shift => d.select_to_text_end(),
+            Key::Named(NamedKey::ArrowRight) if to_end => d.move_to_text_end(),
             Key::Named(NamedKey::ArrowLeft) => match (shift, ctrl) {
                 (true, true) => d.select_word_left(),
                 (true, false) => d.select_left(),
@@ -396,12 +541,35 @@ impl TextField {
         true
     }
 
+    /// Caps Lock, as far as a key tells: a letter in the other case than
+    /// Shift asks for, or the Caps Lock key itself
+    fn guess_caps(&mut self, press: &KeyPress) {
+        let caps = match &press.key {
+            Key::Named(NamedKey::CapsLock) => !self.caps,
+            Key::Character(c) => match c.chars().next().filter(|c| c.is_alphabetic()) {
+                Some(c) if c.is_uppercase() != c.is_lowercase() => {
+                    c.is_uppercase() != press.mods.shift_key()
+                }
+                _ => self.caps,
+            },
+            _ => self.caps,
+        };
+        if caps != self.caps {
+            self.caps = caps;
+            if let Some(f) = &mut self.on_caps {
+                f(caps);
+            }
+        }
+    }
+
     /// Select all and the clipboard
     fn edit(&mut self, cx: &mut EventCx<'_>, edit: Edit) {
         let (fonts, layouts) = cx.text.contexts();
         let mut d = self.editor.driver(fonts, layouts);
         match edit {
             Edit::SelectAll => d.select_all(),
+            // a hidden password stays where it is
+            Edit::Copy | Edit::Cut if self.shown_mask => {}
             Edit::Copy | Edit::Cut => {
                 if let Some(sel) = self.editor.selected_text().map(str::to_owned) {
                     cx.clipboard.set(&sel);
@@ -454,10 +622,11 @@ impl TextField {
     /// The characters of the text in text order – without a composition in
     /// progress, which isn't text yet (GTK doesn't expose it either)
     fn characters(&self) -> Vec<Char> {
-        let Some(layout) = self.editor.try_layout() else {
+        let Some(layout) = self.shown_layout() else {
             return Vec::new();
         };
         let compose = self.editor.raw_compose().clone().unwrap_or(0..0);
+        let compose = self.to_shown(compose.start)..self.to_shown(compose.end);
         let mut chars = Vec::new();
         for (n, line) in layout.lines().enumerate() {
             let m = line.metrics();
@@ -487,6 +656,7 @@ impl TextField {
 
     /// The text position (run and character) of a byte offset
     fn position_of(&self, byte: usize) -> accesskit::TextPosition {
+        let byte = self.to_shown(byte);
         let chars = self.characters();
         let runs = runs(&chars);
         let i = chars
@@ -512,9 +682,24 @@ impl TextField {
         Some(
             chars
                 .get(i)
-                .map_or(self.editor.raw_text().len(), |c| c.start),
+                .map_or(self.editor.raw_text().len(), |c| self.to_real(c.start)),
         )
     }
+}
+
+/// Where the widgets at the end of a field begin: the leftmost one that is
+/// laid out (a `Show` takes no box – its widget does, or nothing)
+fn trailing_start(widgets: &[Box<dyn Widget>]) -> Option<f64> {
+    widgets
+        .iter()
+        .filter_map(|w| {
+            if w.layout_transparent() {
+                trailing_start(w.children())
+            } else {
+                Some(w.bounds().x0)
+            }
+        })
+        .reduce(f64::min)
 }
 
 /// The text runs: a line each (of at most 255 characters – longer lines take
@@ -547,11 +732,14 @@ impl Widget for TextField {
     fn mount(&mut self, cx: &mut MountCx<'_>) {
         let value = self.value.clone();
         let (label, placeholder) = (self.label.signal(), self.placeholder.signal());
-        let field = self.field.clone();
+        let (field, mask) = (self.field.clone(), self.mask.clone());
         self.watch = Some(cx.watch(self.id, move || {
             value.track();
             label.track();
             placeholder.track();
+            if let Some(m) = &mask {
+                m.track();
+            }
             if let Some(f) = &field {
                 f.invalid.track();
                 f.description.track();
@@ -602,6 +790,14 @@ impl Widget for TextField {
                 self.repaint = true;
             }
         }
+        let masked = self.mask.as_ref().is_some_and(GetUntracked::get_untracked);
+        if masked != self.shown_mask || (masked && self.bullets.is_none()) {
+            // shown or hidden: the same text, drawn again; the caret stays
+            self.shown_mask = masked;
+            self.bullets = None;
+            self.refresh(cx.text);
+            self.repaint = true;
+        }
         if self.value.with_untracked(|v| *v != self.synced) {
             self.synced = self.value.with_untracked(String::clone);
             self.editor.set_text(&self.synced);
@@ -621,15 +817,53 @@ impl Widget for TextField {
         change
     }
 
-    fn style(&self, _theme: &Theme) -> taffy::Style {
-        taffy::Style {
+    /// A leaf – with trailing widgets a row that keeps them at its end, 4 px
+    /// in from the edge (the steppers' inset), as high as a control
+    fn style(&self, theme: &Theme) -> taffy::Style {
+        let mut style = taffy::Style {
             min_size: taffy::Size {
                 width: taffy::LengthPercentageAuto::length(0.0),
                 height: taffy::LengthPercentageAuto::auto(),
             },
             flex_grow: if self.grow { 1.0 } else { 0.0 },
             ..Default::default()
+        };
+        if !self.trailing.is_empty() {
+            let px = |v: f64| taffy::LengthPercentage::length(v as f32);
+            style.display = taffy::Display::Flex;
+            style.flex_direction = taffy::FlexDirection::Row;
+            style.justify_content = taffy::JustifyContent::END;
+            style.align_items = taffy::AlignItems::CENTER;
+            style.gap = taffy::Size {
+                width: px(space(1)),
+                height: px(0.0),
+            };
+            style.padding = taffy::Rect {
+                left: px(0.0),
+                right: px(4.0),
+                top: px(0.0),
+                bottom: px(0.0),
+            };
+            // room for some text before what trails it
+            style.min_size = taffy::Size {
+                width: taffy::LengthPercentageAuto::length(160.0),
+                height: taffy::LengthPercentageAuto::length(theme.metrics.control as f32),
+            };
         }
+        style
+    }
+
+    fn children(&self) -> &[Box<dyn Widget>] {
+        &self.trailing
+    }
+
+    fn children_mut(&mut self) -> &mut [Box<dyn Widget>] {
+        &mut self.trailing
+    }
+
+    /// A press on a trailing widget that takes no focus (a stepper) keeps it here
+    fn press_focuses(&self, _p: Point) -> Option<WidgetId> {
+        Some(self.id)
     }
 
     /// As wide as offered (like a block-level input), 240 px on its own;
@@ -673,8 +907,9 @@ impl Widget for TextField {
         true
     }
 
+    /// A hidden password takes no input method (as on GTK): keys only
     fn accepts_text(&self) -> bool {
-        true
+        !self.shown_mask
     }
 
     fn cursor(&self) -> CursorIcon {
@@ -682,8 +917,7 @@ impl Widget for TextField {
     }
 
     fn ime_area(&self) -> Option<Rect> {
-        let a = self.editor.ime_cursor_area();
-        let r = Rect::new(a.x0, a.y0, a.x1, a.y1) + self.text_origin().to_vec2();
+        let r = self.caret_box()? + self.text_origin().to_vec2();
         Some(r.intersect(self.bounds))
     }
 
@@ -704,6 +938,37 @@ impl Widget for TextField {
         match event {
             Event::PointerEnter => self.hovered = true,
             Event::PointerLeave => self.hovered = false,
+            Event::PointerDown(p) if self.shown_mask => {
+                // on the bullets: their character is the text's
+                let (x, y) = self.to_editor(*p);
+                let at = self
+                    .bullets
+                    .as_ref()
+                    .map_or(0, |l| self.to_real(Cursor::from_point(l, x, y).index()));
+                let anchor = self.editor.raw_selection().anchor().index();
+                let (fonts, layouts) = cx.text.contexts();
+                let mut d = self.editor.driver(fonts, layouts);
+                match cx.clicks {
+                    1 if cx.modifiers.shift_key() => d.select_byte_range(anchor, at),
+                    1 => d.select_byte_range(at, at),
+                    _ => d.select_all(),
+                }
+                self.dragging = cx.clicks == 1;
+                self.edited(cx);
+            }
+            Event::PointerMove(p) if self.dragging && self.shown_mask => {
+                let (x, y) = self.to_editor(*p);
+                let at = self
+                    .bullets
+                    .as_ref()
+                    .map_or(0, |l| self.to_real(Cursor::from_point(l, x, y).index()));
+                let anchor = self.editor.raw_selection().anchor().index();
+                let (fonts, layouts) = cx.text.contexts();
+                self.editor
+                    .driver(fonts, layouts)
+                    .select_byte_range(anchor, at);
+                self.edited(cx);
+            }
             Event::PointerDown(p) => {
                 let (x, y) = self.to_editor(*p);
                 let (fonts, layouts) = cx.text.contexts();
@@ -742,6 +1007,7 @@ impl Widget for TextField {
             }
             Event::Focus { focused, visible } => {
                 let gained = *focused && !self.focused;
+                let left = !*focused && self.focused;
                 self.focused = *focused;
                 let (fonts, layouts) = cx.text.contexts();
                 let mut d = self.editor.driver(fonts, layouts);
@@ -753,10 +1019,24 @@ impl Widget for TextField {
                     d.clear_compose();
                 }
                 self.edited(cx);
+                if left && let Some(f) = &mut self.on_blur {
+                    f();
+                }
+                if left
+                    && std::mem::take(&mut self.caps)
+                    && let Some(f) = &mut self.on_caps
+                {
+                    f(false);
+                }
             }
             Event::KeyDown { text, .. } => {
                 let press = cx.press(event).expect("a key press");
-                if self.key(cx, &press, text.as_deref()) {
+                if self.shown_mask {
+                    self.guess_caps(&press);
+                }
+                if self.on_key.as_mut().is_some_and(|f| f(&press)) {
+                    cx.handled = true;
+                } else if self.key(cx, &press, text.as_deref()) {
                     cx.handled = true;
                     self.edited(cx);
                 }
@@ -792,6 +1072,11 @@ impl Widget for TextField {
                     self.edited(cx);
                 }
             }
+            Event::Step(dir) => {
+                if let Some(f) = &mut self.on_step {
+                    f(*dir);
+                }
+            }
             Event::SetValue(v) => {
                 let (fonts, layouts) = cx.text.contexts();
                 let mut d = self.editor.driver(fonts, layouts);
@@ -805,12 +1090,33 @@ impl Widget for TextField {
     }
 
     fn accessibility(&self) -> Option<accesskit::Node> {
-        let mut node = accesskit::Node::new(if self.lines.is_some() {
-            accesskit::Role::MultilineTextInput
-        } else {
-            accesskit::Role::TextInput
+        let mut node = accesskit::Node::new(match (&self.spin, self.lines) {
+            _ if self.mask.is_some() => accesskit::Role::PasswordInput,
+            (Some(_), _) => accesskit::Role::SpinButton,
+            (None, Some(_)) => accesskit::Role::MultilineTextInput,
+            (None, None) => accesskit::Role::TextInput,
         });
-        node.set_value(self.synced.clone());
+        if let Some(spin) = &self.spin {
+            let s = spin();
+            if let Some(v) = s.value {
+                node.set_numeric_value(v);
+            }
+            if let Some(m) = s.min {
+                node.set_min_numeric_value(m);
+            }
+            if let Some(m) = s.max {
+                node.set_max_numeric_value(m);
+            }
+            node.set_numeric_value_step(s.step);
+            node.add_action(accesskit::Action::Increment);
+            node.add_action(accesskit::Action::Decrement);
+        }
+        // a hidden password reads as its bullets
+        node.set_value(if self.shown_mask {
+            self.bullet_text.clone()
+        } else {
+            self.synced.clone()
+        });
         if !self.label.shown.is_empty() {
             node.set_label(self.label.shown.clone());
         }
@@ -845,7 +1151,7 @@ impl Widget for TextField {
     /// character is (for caret tracking and magnifiers)
     fn accessibility_children(&self) -> Vec<(accesskit::NodeId, accesskit::Node)> {
         let chars = self.characters();
-        let text = self.editor.raw_text();
+        let text = self.shown_text();
         let o = self.text_origin();
         let mut prev_space = true;
         // an empty text: one empty run where the first line is
@@ -910,7 +1216,8 @@ impl Widget for TextField {
         ctx.fill_path(&paint::rounded(r, radius));
         paint::inset_shadows(ctx, r, radius, &shadows, 1.0);
 
-        let Some(layout) = self.editor.try_layout() else {
+        let Some(layout) = self.shown_layout() else {
+            cx.paint_children(&self.trailing);
             return;
         };
         let origin = self.text_origin();
@@ -918,7 +1225,20 @@ impl Widget for TextField {
         let at = |b: parley::BoundingBox| Rect::new(b.x0, b.y0, b.x1, b.y1) + origin.to_vec2();
         if self.focused {
             ctx.set_paint(theme.accent_soft);
-            for (b, _) in self.editor.selection_geometry() {
+            let sel = self.editor.raw_selection();
+            let shown = Selection::new(
+                Cursor::from_byte_index(
+                    layout,
+                    self.to_shown(sel.anchor().index()),
+                    Affinity::Downstream,
+                ),
+                Cursor::from_byte_index(
+                    layout,
+                    self.to_shown(sel.focus().index()),
+                    Affinity::Downstream,
+                ),
+            );
+            for (b, _) in shown.geometry(layout) {
                 ctx.fill_rect(&at(b));
             }
         }
@@ -942,12 +1262,19 @@ impl Widget for TextField {
         let since = now.duration_since(self.blink_from);
         let caret_on =
             since >= BLINK_FOR || (since.as_millis() / BLINK.as_millis()).is_multiple_of(2);
+        let caret = if self.shown_mask {
+            self.caret_box()
+        } else {
+            self.editor
+                .cursor_geometry(CARET_WIDTH)
+                .map(|b| Rect::new(b.x0, b.y0, b.x1, b.y1))
+        };
         if self.focused
             && caret_on
-            && let Some(b) = self.editor.cursor_geometry(CARET_WIDTH)
+            && let Some(b) = caret
         {
             ctx.set_paint(theme.text_1);
-            ctx.fill_rect(&at(b));
+            ctx.fill_rect(&(b + origin.to_vec2()));
         }
         ctx.pop_clip();
         // a textarea with more lines than it shows: a thin thumb at its end
@@ -963,6 +1290,7 @@ impl Widget for TextField {
                 1.5,
             ));
         }
+        cx.paint_children(&self.trailing);
     }
 }
 

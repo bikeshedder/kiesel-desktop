@@ -55,6 +55,11 @@ pub const PAGES: &[Page] = &[
         make: pages::form::page,
     },
     Page {
+        id: "inputs",
+        title: "Numbers & passwords",
+        make: pages::inputs::page,
+    },
+    Page {
         id: "field",
         title: "Fields",
         make: pages::field::page,
