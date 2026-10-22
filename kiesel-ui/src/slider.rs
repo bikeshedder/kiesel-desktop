@@ -182,7 +182,10 @@ impl Slider {
     fn travel(&self) -> (f64, f64) {
         let (_, knob) = dims(self.size);
         let t = self.track();
-        (t.x0 + knob / 2.0, (t.x1 - knob / 2.0).max(t.x0 + knob / 2.0))
+        (
+            t.x0 + knob / 2.0,
+            (t.x1 - knob / 2.0).max(t.x0 + knob / 2.0),
+        )
     }
 
     /// Where along the track `v` is (0 … 1)

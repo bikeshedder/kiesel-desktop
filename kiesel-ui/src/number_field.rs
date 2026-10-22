@@ -215,7 +215,7 @@ impl NumberField {
         }));
         field.on_key = Some(Box::new({
             let step = step.clone();
-            move |press: &KeyPress| {
+            move |press: &KeyPress, _cx: &mut crate::widget::EventCx<'_>| {
                 let dir = match press.key {
                     Key::Named(NamedKey::ArrowUp) => 1.0,
                     Key::Named(NamedKey::ArrowDown) => -1.0,

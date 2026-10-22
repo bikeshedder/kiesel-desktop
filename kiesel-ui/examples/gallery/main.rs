@@ -80,6 +80,11 @@ pub const PAGES: &[Page] = &[
         make: pages::choices::page,
     },
     Page {
+        id: "select",
+        title: "Selects",
+        make: pages::select::page,
+    },
+    Page {
         id: "segmented",
         title: "Segmented",
         make: pages::segmented::page,

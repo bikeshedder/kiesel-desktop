@@ -146,6 +146,25 @@ impl<T: Send + Sync + 'static, K: Eq + Hash + Clone + 'static> For<T, K> {
             bounds: Rect::ZERO,
         }
     }
+
+    /// Like [`For::new`], for items that make widgets of different kinds
+    pub fn boxed(
+        each: impl Into<ArcSignal<Vec<T>>>,
+        key: impl Fn(&T) -> K + 'static,
+        make: impl FnMut(&T) -> Box<dyn Widget> + 'static,
+    ) -> Self {
+        Self {
+            id: WidgetId::next(),
+            each: each.into(),
+            watch: None,
+            key: Box::new(key),
+            make: Box::new(make),
+            keys: Vec::new(),
+            children: Vec::new(),
+            started: false,
+            bounds: Rect::ZERO,
+        }
+    }
 }
 
 impl<T: Send + Sync + 'static, K: Eq + Hash + Clone + 'static> Widget for For<T, K> {

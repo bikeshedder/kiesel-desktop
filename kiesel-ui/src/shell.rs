@@ -150,6 +150,7 @@ pub fn run(
         always_full: std::env::var_os("KIESEL_FULL_REDRAW").is_some(),
         needs_place: false,
         handled: false,
+        origin: None,
         a11y_stale: false,
         pointer: None,
         hovered: None,
@@ -211,6 +212,8 @@ struct Shell {
     needs_place: bool,
     /// Whether the last widget sent an event handled it
     handled: bool,
+    /// While an event bubbles: the widget it was meant for
+    origin: Option<WidgetId>,
     /// Positions changed in animation frames since the accessibility tree was built
     a11y_stale: bool,
     /// Last pointer position (logical)
@@ -281,6 +284,7 @@ impl Shell {
             clicks: self.clicks,
             handled: false,
             focus_request: None,
+            origin: self.origin.or(Some(id)),
         };
         let found = match widget::find_mut(self.root.as_mut(), id) {
             Some(w) => {
@@ -306,12 +310,16 @@ impl Shell {
         let Some(path) = widget::path(self.root.as_ref(), target) else {
             return false;
         };
+        self.origin = Some(target);
+        let mut used = false;
         for id in path.into_iter().rev() {
             if self.send(id, event.clone()) && self.handled {
-                return true;
+                used = true;
+                break;
             }
         }
-        false
+        self.origin = None;
+        used
     }
 
     /// Asks the widgets that got events or whose signals changed what changed;
@@ -445,9 +453,18 @@ impl Shell {
             self.reposition();
         }
         if let Some(layer) = focus_into {
-            // opened from the keyboard: focus moves into it
-            let first = widget::find(self.root.as_ref(), layer)
-                .and_then(|l| widget::focus_order(l).first().copied());
+            // opened from the keyboard: focus moves into it – onto the widget
+            // that asks for it (a list's chosen option), else the first
+            let first = widget::find(self.root.as_ref(), layer).and_then(|l| {
+                let order = widget::focus_order(l);
+                order
+                    .iter()
+                    .find(|id| {
+                        widget::find(self.root.as_ref(), **id).is_some_and(|w| w.prefers_focus())
+                    })
+                    .or(order.first())
+                    .copied()
+            });
             if let Some(first) = first {
                 self.set_focus(Some(first), true);
             }
@@ -485,7 +502,8 @@ impl Shell {
                 Command::Open(mut layer) => {
                     layer.restore_focus = self.focused;
                     layer.opened_at(now, self.theme.reduce_motion);
-                    if self.focus_visible && self.focused == Some(layer.owner) {
+                    // opened from the keyboard – or a list, which always takes the focus
+                    if (self.focus_visible && self.focused == Some(layer.owner)) || layer.list {
                         focus_into = Some(layer.id());
                     }
                     self.root.push_layer(layer);
@@ -516,10 +534,11 @@ impl Shell {
         let ink = layer.ink();
         self.add_damage(ink);
         self.request_redraw();
+        // focus inside it – or on a widget that vanished as it closed (a
+        // "Clear" that went with the value) – goes back
         let focus_inside = self
             .focused
-            .and_then(|f| widget::path(self.root.as_ref(), f))
-            .is_some_and(|p| p.contains(&id));
+            .is_some_and(|f| widget::path(self.root.as_ref(), f).is_none_or(|p| p.contains(&id)));
         if focus_inside {
             let visible = self.focus_visible;
             self.focused = None;
@@ -556,7 +575,19 @@ impl Shell {
         if !gone(&focused) {
             return;
         }
-        let now = widget::focus_order(root);
+        // not into a popup that is closing
+        let closing: Vec<WidgetId> = self
+            .root
+            .layers()
+            .filter(|l| l.is_closing())
+            .map(|l| l.id())
+            .collect();
+        let now: Vec<WidgetId> = widget::focus_order(root)
+            .into_iter()
+            .filter(|id| {
+                widget::path(root, *id).is_none_or(|p| !p.iter().any(|x| closing.contains(x)))
+            })
+            .collect();
         let at = before.iter().position(|&id| id == focused).unwrap_or(0);
         let next = before[at + 1..]
             .iter()

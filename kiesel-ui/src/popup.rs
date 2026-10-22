@@ -79,6 +79,9 @@ pub struct Popup {
     pub content: Box<dyn Widget>,
     /// Closed by the user (a click outside, Escape) – the owner updates its state
     pub on_dismiss: Option<Box<dyn FnMut()>>,
+    /// A list (a select's options): no padding of its own, at most 400 px high,
+    /// at least as wide as its anchor
+    pub list: bool,
 }
 
 pub(crate) enum Command {
@@ -215,6 +218,8 @@ pub(crate) struct Layer {
     label: String,
     children: Vec<Box<dyn Widget>>,
     on_dismiss: Option<Box<dyn FnMut()>>,
+    /// A list: focus moves in however it opened
+    pub list: bool,
     /// Focused before it opened: focus goes back there
     pub restore_focus: Option<WidgetId>,
     layout: Layout,
@@ -240,6 +245,7 @@ impl Layer {
             label: p.label,
             children: vec![p.content],
             on_dismiss: p.on_dismiss,
+            list: p.list,
             restore_focus: None,
             layout: Layout::default(),
             bounds: Rect::ZERO,
@@ -259,6 +265,12 @@ impl Layer {
             window.height() - 2.0 * MARGIN,
         );
         let mut layout = std::mem::take(&mut self.layout);
+        if self.list {
+            // a list fits on the side of its anchor with more room – it scrolls
+            let below = window.y1 - MARGIN - (self.anchor.y1 + GAP);
+            let above = self.anchor.y0 - GAP - (window.y0 + MARGIN);
+            self.room.height = below.max(above).max(80.0);
+        }
         let size = layout.fit(self, cx, dirty);
         let (origin, side, arrow_at) = place(self.anchor, size, window, self.placement, self.arrow);
         self.side = side;
@@ -373,10 +385,28 @@ impl Widget for Layer {
         true
     }
 
-    /// Popover.module.css: padding --size-2, 200–360 px wide, no higher than the window
+    /// Popover.module.css: padding --size-2, 200–360 px wide, no higher than the window;
+    /// a list (OptionList.module.css .popup): no padding, as wide as its anchor
+    /// at least, at most 400 px high
     fn style(&self, _theme: &Theme) -> taffy::Style {
-        let pad = taffy::LengthPercentage::length(space(2) as f32);
         let len = |v: f64| taffy::LengthPercentageAuto::length(v as f32);
+        if self.list {
+            let wide = self.anchor.width().max(160.0).min(self.room.width);
+            return taffy::Style {
+                display: taffy::Display::Flex,
+                flex_direction: taffy::FlexDirection::Column,
+                min_size: taffy::Size {
+                    width: len(wide),
+                    height: taffy::LengthPercentageAuto::auto(),
+                },
+                max_size: taffy::Size {
+                    width: len(480.0_f64.max(wide).min(self.room.width)),
+                    height: len(400.0_f64.min(self.room.height)),
+                },
+                ..Default::default()
+            };
+        }
+        let pad = taffy::LengthPercentage::length(space(2) as f32);
         taffy::Style {
             display: taffy::Display::Flex,
             flex_direction: taffy::FlexDirection::Column,
@@ -696,6 +726,7 @@ impl Widget for Popover {
                     },
                     content: (self.make)(),
                     on_dismiss: Some(Box::new(move || open.set(false))),
+                    list: false,
                 }));
             }
             (false, Some(layer)) => {

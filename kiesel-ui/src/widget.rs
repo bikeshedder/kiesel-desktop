@@ -174,6 +174,9 @@ pub struct EventCx<'a> {
     pub handled: bool,
     /// Asked for with [`EventCx::request_focus`]
     pub(crate) focus_request: Option<WidgetId>,
+    /// The widget the event was meant for – an ancestor hearing a key that
+    /// bubbled up learns where it started (a list's focused option)
+    pub origin: Option<WidgetId>,
 }
 
 impl EventCx<'_> {
@@ -355,6 +358,11 @@ pub trait Widget: AsAny {
     }
 
     fn focusable(&self) -> bool {
+        false
+    }
+
+    /// Where focus goes when a popup it is in opens (a list's chosen option)
+    fn prefers_focus(&self) -> bool {
         false
     }
 

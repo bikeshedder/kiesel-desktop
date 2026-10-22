@@ -48,7 +48,7 @@ type OnSubmit = Box<dyn FnMut(&str)>;
 /// Hears the text typed (not set from outside)
 type OnInput = Box<dyn FnMut(&str)>;
 /// Sees a key before the field: true if it used it (a number field's Up/Down)
-type OnKey = Box<dyn FnMut(&KeyPress) -> bool>;
+type OnKey = Box<dyn FnMut(&KeyPress, &mut EventCx<'_>) -> bool>;
 
 /// A number field, for assistive technology: a spin button
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -1034,7 +1034,7 @@ impl Widget for TextField {
                 if self.shown_mask {
                     self.guess_caps(&press);
                 }
-                if self.on_key.as_mut().is_some_and(|f| f(&press)) {
+                if self.on_key.as_mut().is_some_and(|f| f(&press, cx)) {
                     cx.handled = true;
                 } else if self.key(cx, &press, text.as_deref()) {
                     cx.handled = true;
@@ -1366,6 +1366,7 @@ mod tests {
                 clicks: 1,
                 handled: false,
                 focus_request: None,
+                origin: None,
             };
             self.field.event(&mut cx, &event);
         }

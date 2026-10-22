@@ -11,6 +11,7 @@ pub mod inputs;
 pub mod list;
 pub mod popover;
 pub mod segmented;
+pub mod select;
 pub mod shortcuts;
 pub mod slider;
 pub mod textarea;
